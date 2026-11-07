@@ -8,6 +8,7 @@ from app.models.order import Order
 from app.models.order_allocation import OrderAllocation
 from app.models.inventory_movement import InventoryMovement
 from app.models.order_item import OrderItem
+from app.models.outbox_event import OutboxEvent
 
 
 @pytest.mark.parametrize(
@@ -50,7 +51,6 @@ def create_test_order(client, scenario, quantity):
     return response.json()["id"]
 
 
-
 def get_reservation_records(db_session, order_id):
     return db_session.scalars(
         select(OrderAllocation)
@@ -58,7 +58,19 @@ def get_reservation_records(db_session, order_id):
             OrderItem,
             OrderAllocation.order_item_id == OrderItem.id,
         )
-        .where(OrderItem.order_id == uuid.UUID(str(order_id)))
+        .where(
+            OrderItem.order_id == uuid.UUID(str(order_id))
+        )
+    ).all()
+
+
+def get_outbox_events(db_session, order_id):
+    return db_session.scalars(
+        select(OutboxEvent).where(
+            OutboxEvent.aggregate_id == uuid.UUID(
+                str(order_id)
+            )
+        )
     ).all()
 
 
@@ -88,7 +100,10 @@ def test_accept_order_reserves_inventory(
 
     assert len(allocations) == 1
     assert allocations[0].quantity == 100
-    assert allocations[0].batch_id == order_scenario["batch"].id
+    assert (
+        allocations[0].batch_id
+        == order_scenario["batch"].id
+    )
 
     movements = db_session.scalars(
         select(InventoryMovement).where(
@@ -98,6 +113,24 @@ def test_accept_order_reserves_inventory(
 
     assert len(movements) == 1
     assert movements[0].quantity == 100
+
+    # Verify the outbox event was committed.
+    events = get_outbox_events(db_session, order_id)
+
+    assert len(events) == 1
+
+    event = events[0]
+
+    assert event.event_type == "OrderAccepted"
+    assert event.aggregate_id == uuid.UUID(order_id)
+    assert event.status == "PENDING"
+    assert event.published_at is None
+
+    assert event.payload["event_type"] == "OrderAccepted"
+    assert event.payload["order_id"] == order_id
+    assert event.payload["seller_organization_id"] == str(
+        order_scenario["grower"].id
+    )
 
 
 def test_insufficient_inventory_rolls_back(
@@ -113,10 +146,15 @@ def test_insufficient_inventory_rolls_back(
     )
 
     assert response.status_code == 409
-    assert "Insufficient inventory" in response.json()["detail"]
+    assert (
+        "Insufficient inventory"
+        in response.json()["detail"]
+    )
 
     # Order must remain PENDING.
-    order = db_session.get(Order, uuid.UUID(order_id))
+    order = db_session.get(
+        Order, uuid.UUID(order_id)
+    )
     db_session.refresh(order)
 
     assert order.status == "PENDING"
@@ -143,6 +181,11 @@ def test_insufficient_inventory_rolls_back(
     ).all()
 
     assert len(movements) == 0
+
+    # Failed acceptance must not produce an outbox event.
+    events = get_outbox_events(db_session, order_id)
+
+    assert len(events) == 0
 
 
 def test_duplicate_acceptance_does_not_reserve_twice(
@@ -190,3 +233,10 @@ def test_duplicate_acceptance_does_not_reserve_twice(
 
     assert len(movements) == 1
     assert movements[0].quantity == 100
+
+    # Duplicate acceptance must not create another event.
+    events = get_outbox_events(db_session, order_id)
+
+    assert len(events) == 1
+    assert events[0].event_type == "OrderAccepted"
+    assert events[0].status == "PENDING"

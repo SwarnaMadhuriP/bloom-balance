@@ -18,6 +18,7 @@ from app.models.inventory_location import InventoryLocation
 from app.models.inventory_movement import InventoryMovement
 
 from app.schemas.order import OrderCreate
+from app.models.outbox_event import OutboxEvent
 
 
 def get_locked_order(db: Session, order_id: uuid.UUID):
@@ -303,6 +304,22 @@ def accept_order(db: Session, order_id: uuid.UUID):
 
         # 6. Update order status.
         order.status = "ACCEPTED"
+
+        #registering the event in outboxevent to add to kafka later
+        event = OutboxEvent(
+            aggregate_id=order.id,
+            event_type="OrderAccepted",
+            payload={
+                "event_type": "OrderAccepted",
+                "order_id": str(order.id),
+                "seller_organization_id": str(
+                order.seller_organization_id
+        ),
+        },
+            status="PENDING",
+        ) 
+        db.add(event)
+
 
         # 7. Commit all changes atomically.
         db.commit()

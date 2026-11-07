@@ -18,3 +18,4 @@ from app.models.order_allocation import OrderAllocation
 
 from app.models.delivery import Delivery
 from app.models.waste_record import WasteRecord
+from app.models.outbox_event import OutboxEvent
