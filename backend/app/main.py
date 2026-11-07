@@ -9,6 +9,9 @@ from app.api.inventory import router as inventory_router
 
 from app.api.orders import router as orders_router
 
+from app.api.marketplace import router as marketplace_router
+from app.api.surplus_listings import router as surplus_router
+
 
 app = FastAPI(
     title="BloomBalance API",
@@ -19,6 +22,8 @@ app.include_router(flowers_router)
 app.include_router(flower_batches_router)
 app.include_router(inventory_router)
 app.include_router(orders_router)
+app.include_router(marketplace_router)
+app.include_router(surplus_router)
 
 @app.get("/")
 def root():

@@ -14,6 +14,8 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from decimal import Decimal
+from sqlalchemy import Numeric
 
 
 class FlowerBatch(Base):
@@ -28,6 +30,10 @@ class FlowerBatch(Base):
             "expiry_date >= harvest_date",
             name="ck_flower_batch_expiry_date"
         ),
+        CheckConstraint(
+            "price_per_unit > 0",
+            name="ck_flower_batch_positive_price",
+),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -70,3 +76,8 @@ class FlowerBatch(Base):
         server_default=func.now(),
         nullable=False
     )
+
+    price_per_unit: Mapped[Decimal] = mapped_column(
+    Numeric(10, 2),
+    nullable=False,
+)

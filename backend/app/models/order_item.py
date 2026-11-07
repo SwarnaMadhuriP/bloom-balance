@@ -48,6 +48,13 @@ class OrderItem(Base):
         nullable=False
     )
 
+    surplus_listing_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("surplus_listings.id"),
+        nullable=True,
+        index=True,
+    )
+
     quantity: Mapped[int] = mapped_column(
         Integer,
         nullable=False

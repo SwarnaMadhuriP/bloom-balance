@@ -32,8 +32,8 @@ class SurplusListing(Base):
             name="ck_surplus_remaining_quantity"
         ),
         CheckConstraint(
-            "price_per_stem >= 0",
-            name="ck_surplus_price_nonnegative"
+            "price_per_unit > 0",
+            name="ck_surplus_price_positive",
         ),
         CheckConstraint(
             "status IN ('ACTIVE', 'SOLD_OUT', 'EXPIRED', 'CANCELLED')",
@@ -76,10 +76,10 @@ class SurplusListing(Base):
         nullable=False
     )
 
-    price_per_stem: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2),
-        nullable=False
-    )
+    price_per_unit: Mapped[Decimal] = mapped_column(
+    Numeric(10, 2),
+    nullable=False,
+)
 
     status: Mapped[str] = mapped_column(
         String(20),

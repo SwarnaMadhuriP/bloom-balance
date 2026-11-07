@@ -3,6 +3,8 @@ import uuid
 from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from decimal import Decimal
+
 
 
 class FlowerBatchCreate(BaseModel):
@@ -11,6 +13,11 @@ class FlowerBatchCreate(BaseModel):
     harvest_date: date
     expiry_date: date
     initial_quantity: int = Field(gt=0)
+    price_per_unit: Decimal = Field(
+    gt=0,
+    max_digits=10,
+    decimal_places=2,
+)
 
     @model_validator(mode="after")
     def validate_dates(self):
