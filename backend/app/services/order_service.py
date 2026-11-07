@@ -182,11 +182,14 @@ def create_order(db: Session, request: OrderCreate):
         raise
 
 
+
 def accept_order(db: Session, order_id: uuid.UUID):
     try:
+        # 1. Lock the order to prevent duplicate acceptance.
         order = get_locked_order(db, order_id)
         require_status(order, "PENDING")
 
+        # 2. Fetch order items in a consistent order.
         items = db.scalars(
             select(OrderItem)
             .where(OrderItem.order_id == order.id)
@@ -194,9 +197,15 @@ def accept_order(db: Session, order_id: uuid.UUID):
         ).all()
 
         if not items:
-            raise HTTPException(409, "Order has no items")
+            raise HTTPException(
+                status_code=409,
+                detail="Order has no items",
+            )
 
-        # Lock eligible inventory rows.
+        # Only fetch inventory for requested flowers.
+        flower_ids = {item.flower_id for item in items}
+
+        # 3. Lock eligible inventory rows.
         stock_rows = db.execute(
             select(InventoryBalance, FlowerBatch)
             .join(
@@ -210,9 +219,14 @@ def accept_order(db: Session, order_id: uuid.UUID):
             .where(
                 FlowerBatch.grower_organization_id
                 == order.seller_organization_id,
+
                 InventoryLocation.organization_id
                 == order.seller_organization_id,
+
+                FlowerBatch.flower_id.in_(flower_ids),
+
                 FlowerBatch.expiry_date >= date.today(),
+
                 InventoryBalance.available_quantity > 0,
             )
             .order_by(
@@ -222,6 +236,7 @@ def accept_order(db: Session, order_id: uuid.UUID):
             .with_for_update(of=InventoryBalance)
         ).all()
 
+        # 4. Group inventory balances by flower.
         stock_by_flower = {}
 
         for balance, batch in stock_rows:
@@ -229,6 +244,7 @@ def accept_order(db: Session, order_id: uuid.UUID):
                 batch.flower_id, []
             ).append(balance)
 
+        # 5. Reserve inventory for every order item.
         for item in items:
             remaining = item.quantity
 
@@ -246,9 +262,11 @@ def accept_order(db: Session, order_id: uuid.UUID):
                 if allocated <= 0:
                     continue
 
+                # Move available stock into reserved stock.
                 balance.available_quantity -= allocated
                 balance.reserved_quantity += allocated
 
+                # Record which batch fulfills this order item.
                 db.add(
                     OrderAllocation(
                         order_item_id=item.id,
@@ -258,6 +276,7 @@ def accept_order(db: Session, order_id: uuid.UUID):
                     )
                 )
 
+                # Record the inventory movement.
                 db.add(
                     InventoryMovement(
                         batch_id=balance.batch_id,
@@ -272,13 +291,20 @@ def accept_order(db: Session, order_id: uuid.UUID):
 
                 remaining -= allocated
 
+            # All-or-nothing reservation.
             if remaining > 0:
                 raise HTTPException(
-                    409,
-                    f"Insufficient inventory for flower {item.flower_id}",
+                    status_code=409,
+                    detail=(
+                        "Insufficient inventory for flower "
+                        f"{item.flower_id}"
+                    ),
                 )
 
+        # 6. Update order status.
         order.status = "ACCEPTED"
+
+        # 7. Commit all changes atomically.
         db.commit()
 
         return {
@@ -290,6 +316,7 @@ def accept_order(db: Session, order_id: uuid.UUID):
     except Exception:
         db.rollback()
         raise
+
 
 
 def prepare_order(db: Session, order_id: uuid.UUID):
