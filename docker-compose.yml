@@ -60,6 +60,40 @@ services:
     volumes:
       - kafka_data:/var/lib/kafka/data
 
+  outbox-publisher:
+    build:
+      context: ./backend
+    command: python -u -m app.workers.outbox_publisher
+    env_file:
+      - .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    restart: unless-stopped
+
+  notification-consumer:
+    build:
+      context: ./backend
+    command: python -u -m app.workers.notification_consumer
+    env_file:
+      - .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   kafka_data:
