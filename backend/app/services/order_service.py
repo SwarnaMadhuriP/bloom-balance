@@ -19,6 +19,10 @@ from app.models.inventory_movement import InventoryMovement
 
 from app.schemas.order import OrderCreate
 from app.models.outbox_event import OutboxEvent
+from datetime import datetime, timezone
+
+from app.models.surplus_listing import SurplusListing
+
 
 
 def get_locked_order(db: Session, order_id: uuid.UUID):
@@ -184,13 +188,12 @@ def create_order(db: Session, request: OrderCreate):
 
 
 
+
 def accept_order(db: Session, order_id: uuid.UUID):
     try:
-        # 1. Lock the order to prevent duplicate acceptance.
         order = get_locked_order(db, order_id)
         require_status(order, "PENDING")
 
-        # 2. Fetch order items in a consistent order.
         items = db.scalars(
             select(OrderItem)
             .where(OrderItem.order_id == order.id)
@@ -198,15 +201,44 @@ def accept_order(db: Session, order_id: uuid.UUID):
         ).all()
 
         if not items:
-            raise HTTPException(
-                status_code=409,
-                detail="Order has no items",
-            )
+            raise HTTPException(409, "Order has no items")
 
-        # Only fetch inventory for requested flowers.
         flower_ids = {item.flower_id for item in items}
+        surplus_ids = {
+            item.surplus_listing_id
+            for item in items
+            if item.surplus_listing_id is not None
+        }
 
-        # 3. Lock eligible inventory rows.
+        # Lock all relevant flower batches in a stable order.
+        # This also coordinates with listing creation, which
+        # locks the corresponding FlowerBatch.
+        batches = db.scalars(
+            select(FlowerBatch)
+            .where(
+                FlowerBatch.grower_organization_id
+                == order.seller_organization_id,
+                FlowerBatch.flower_id.in_(flower_ids),
+            )
+            .order_by(FlowerBatch.id)
+            .with_for_update()
+        ).all()
+
+        batch_by_id = {batch.id: batch for batch in batches}
+
+        # Lock the surplus listings referenced by this order.
+        listings = db.scalars(
+            select(SurplusListing)
+            .where(SurplusListing.id.in_(surplus_ids))
+            .order_by(SurplusListing.id)
+            .with_for_update()
+        ).all() if surplus_ids else []
+
+        listing_by_id = {
+            listing.id: listing for listing in listings
+        }
+
+        # Lock inventory rows.
         stock_rows = db.execute(
             select(InventoryBalance, FlowerBatch)
             .join(
@@ -215,20 +247,16 @@ def accept_order(db: Session, order_id: uuid.UUID):
             )
             .join(
                 InventoryLocation,
-                InventoryBalance.location_id == InventoryLocation.id,
+                InventoryBalance.location_id
+                == InventoryLocation.id,
             )
             .where(
                 FlowerBatch.grower_organization_id
                 == order.seller_organization_id,
-
                 InventoryLocation.organization_id
                 == order.seller_organization_id,
-
                 FlowerBatch.flower_id.in_(flower_ids),
-
                 FlowerBatch.expiry_date >= date.today(),
-
-                InventoryBalance.available_quantity > 0,
             )
             .order_by(
                 InventoryBalance.batch_id,
@@ -237,37 +265,149 @@ def accept_order(db: Session, order_id: uuid.UUID):
             .with_for_update(of=InventoryBalance)
         ).all()
 
-        # 4. Group inventory balances by flower.
         stock_by_flower = {}
+        stock_by_batch = {}
 
         for balance, batch in stock_rows:
             stock_by_flower.setdefault(
                 batch.flower_id, []
             ).append(balance)
 
-        # 5. Reserve inventory for every order item.
-        for item in items:
+            stock_by_batch.setdefault(
+                batch.id, []
+            ).append(balance)
+
+        # Pending surplus orders have already reduced
+        # listing.remaining_quantity. Both pending purchases
+        # and unpurchased active listing capacity need protection.
+        #
+        # Count commitments for all non-expired batches.
+        now = datetime.now(timezone.utc)
+
+        active_listing_rows = db.execute(
+            select(
+                SurplusListing.batch_id,
+                func.coalesce(
+                    func.sum(SurplusListing.remaining_quantity), 0
+                ),
+            )
+            .where(
+                SurplusListing.batch_id.in_(
+                    list(batch_by_id.keys())
+                ),
+                SurplusListing.status == "ACTIVE",
+                SurplusListing.expires_at > now,
+            )
+            .group_by(SurplusListing.batch_id)
+        ).all()
+
+        protected_by_batch = {
+            batch_id: int(quantity)
+            for batch_id, quantity in active_listing_rows
+        }
+
+        # Include pending surplus purchases as commitments.
+        pending_rows = db.execute(
+            select(
+                SurplusListing.batch_id,
+                func.coalesce(func.sum(OrderItem.quantity), 0),
+            )
+            .join(
+                OrderItem,
+                OrderItem.surplus_listing_id == SurplusListing.id,
+            )
+            .join(Order, Order.id == OrderItem.order_id)
+            .where(
+                SurplusListing.batch_id.in_(
+                    list(batch_by_id.keys())
+                ),
+                Order.status == "PENDING",
+            )
+            .group_by(SurplusListing.batch_id)
+        ).all()
+
+        for batch_id, quantity in pending_rows:
+            protected_by_batch[batch_id] = (
+                protected_by_batch.get(batch_id, 0)
+                + int(quantity)
+            )
+
+        # Reserve surplus items before regular items.
+        ordered_items = sorted(
+            items,
+            key=lambda item: (
+                item.surplus_listing_id is None,
+                str(item.id),
+            ),
+        )
+
+        for item in ordered_items:
             remaining = item.quantity
 
-            for balance in stock_by_flower.get(
-                item.flower_id, []
-            ):
+            if item.surplus_listing_id is not None:
+                listing = listing_by_id.get(
+                    item.surplus_listing_id
+                )
+
+                if listing is None:
+                    raise HTTPException(
+                        409, "Surplus listing not found"
+                    )
+
+                batch = batch_by_id.get(listing.batch_id)
+
+                if (
+                    batch is None
+                    or batch.flower_id != item.flower_id
+                ):
+                    raise HTTPException(
+                        409, "Invalid surplus batch"
+                    )
+
+                eligible_balances = stock_by_batch.get(
+                    listing.batch_id, []
+                )
+
+                # This pending order is being accepted,
+                # so release its own pending commitment.
+                protected_by_batch[listing.batch_id] -= (
+                    item.quantity
+                )
+
+            else:
+                eligible_balances = stock_by_flower.get(
+                    item.flower_id, []
+                )
+
+            for balance in eligible_balances:
                 if remaining == 0:
                     break
+
+                protected = protected_by_batch.get(
+                    balance.batch_id, 0
+                )
+
+                batch_available = sum(
+                    row.available_quantity
+                    for row in stock_by_batch.get(
+                        balance.batch_id, []
+                    )
+                )
+
+                usable = max(0, batch_available - protected)
 
                 allocated = min(
                     remaining,
                     balance.available_quantity,
+                    usable,
                 )
 
                 if allocated <= 0:
                     continue
 
-                # Move available stock into reserved stock.
                 balance.available_quantity -= allocated
                 balance.reserved_quantity += allocated
 
-                # Record which batch fulfills this order item.
                 db.add(
                     OrderAllocation(
                         order_item_id=item.id,
@@ -277,7 +417,6 @@ def accept_order(db: Session, order_id: uuid.UUID):
                     )
                 )
 
-                # Record the inventory movement.
                 db.add(
                     InventoryMovement(
                         batch_id=balance.batch_id,
@@ -292,20 +431,17 @@ def accept_order(db: Session, order_id: uuid.UUID):
 
                 remaining -= allocated
 
-            # All-or-nothing reservation.
             if remaining > 0:
                 raise HTTPException(
                     status_code=409,
                     detail=(
-                        "Insufficient inventory for flower "
-                        f"{item.flower_id}"
+                        "Insufficient uncommitted inventory "
+                        f"for flower {item.flower_id}"
                     ),
                 )
 
-        # 6. Update order status.
         order.status = "ACCEPTED"
 
-        #registering the event in outboxevent to add to kafka later
         event = OutboxEvent(
             aggregate_id=order.id,
             event_type="OrderAccepted",
@@ -313,15 +449,13 @@ def accept_order(db: Session, order_id: uuid.UUID):
                 "event_type": "OrderAccepted",
                 "order_id": str(order.id),
                 "seller_organization_id": str(
-                order.seller_organization_id
-        ),
-        },
+                    order.seller_organization_id
+                ),
+            },
             status="PENDING",
-        ) 
+        )
+
         db.add(event)
-
-
-        # 7. Commit all changes atomically.
         db.commit()
 
         return {
@@ -354,6 +488,7 @@ def prepare_order(db: Session, order_id: uuid.UUID):
         raise
 
 
+
 def cancel_order(db: Session, order_id: uuid.UUID):
     try:
         order = get_locked_order(db, order_id)
@@ -364,7 +499,82 @@ def cancel_order(db: Session, order_id: uuid.UUID):
                 f"Cannot cancel order in status {order.status}",
             )
 
-        if order.status == "ACCEPTED":
+        if order.status == "PENDING":
+            items = db.scalars(
+                select(OrderItem)
+                .where(OrderItem.order_id == order.id)
+                .order_by(OrderItem.id)
+            ).all()
+
+            surplus_items = [
+                item for item in items
+                if item.surplus_listing_id is not None
+            ]
+
+            if surplus_items:
+                listing_ids = sorted({
+                    item.surplus_listing_id
+                    for item in surplus_items
+                })
+
+                # Lock the associated batches first.
+                batch_ids = db.scalars(
+                    select(SurplusListing.batch_id)
+                    .where(SurplusListing.id.in_(listing_ids))
+                ).all()
+
+                db.scalars(
+                    select(FlowerBatch)
+                    .where(FlowerBatch.id.in_(batch_ids))
+                    .order_by(FlowerBatch.id)
+                    .with_for_update()
+                ).all()
+
+                listings = db.scalars(
+                    select(SurplusListing)
+                    .where(SurplusListing.id.in_(listing_ids))
+                    .order_by(SurplusListing.id)
+                    .with_for_update()
+                ).all()
+
+                listing_map = {
+                    listing.id: listing
+                    for listing in listings
+                }
+
+                now = datetime.now(timezone.utc)
+
+                for item in surplus_items:
+                    listing = listing_map.get(
+                        item.surplus_listing_id
+                    )
+
+                    if listing is None:
+                        raise HTTPException(
+                            409,
+                            "Surplus listing no longer exists",
+                        )
+
+                    # Only restore to an eligible listing.
+                    if (
+                        listing.status in ("ACTIVE", "SOLD_OUT")
+                        and listing.expires_at > now
+                    ):
+                        listing.remaining_quantity += item.quantity
+
+                        if (
+                            listing.remaining_quantity
+                            > listing.listed_quantity
+                        ):
+                            raise HTTPException(
+                                409,
+                                "Surplus listing quantity exceeded",
+                            )
+
+                        if listing.status == "SOLD_OUT":
+                            listing.status = "ACTIVE"
+
+        elif order.status == "ACCEPTED":
             allocations = get_order_allocations(db, order.id)
 
             if not allocations:
@@ -372,10 +582,11 @@ def cancel_order(db: Session, order_id: uuid.UUID):
                     409, "Accepted order has no allocations"
                 )
 
-            balances = lock_allocation_balances(db, allocations)
+            balances = lock_allocation_balances(
+                db, allocations
+            )
             totals = allocation_totals(allocations)
 
-            # Validate before modifying anything.
             for key, quantity in totals.items():
                 if balances[key].reserved_quantity < quantity:
                     raise HTTPException(
@@ -412,6 +623,7 @@ def cancel_order(db: Session, order_id: uuid.UUID):
     except Exception:
         db.rollback()
         raise
+
 
 
 def dispatch_order(db: Session, order_id: uuid.UUID):

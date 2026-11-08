@@ -11,6 +11,12 @@ from app.api.orders import router as orders_router
 
 from app.api.marketplace import router as marketplace_router
 from app.api.surplus_listings import router as surplus_router
+from app.api.waste_records import router as waste_records_router
+from app.api.bloomtrace_analytics import (
+    router as bloomtrace_analytics_router,
+)
+from app.api.flower_expiry import router as flower_expiry_router
+
 
 
 app = FastAPI(
@@ -24,6 +30,10 @@ app.include_router(inventory_router)
 app.include_router(orders_router)
 app.include_router(marketplace_router)
 app.include_router(surplus_router)
+app.include_router(waste_records_router)
+app.include_router(bloomtrace_analytics_router)
+app.include_router(flower_expiry_router)
+
 
 @app.get("/")
 def root():
