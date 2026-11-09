@@ -1,19 +1,19 @@
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy import select, or_, update
 from sqlalchemy.orm import Session
 
 from app.models.flower_batch import FlowerBatch
 from app.models.inventory_balance import InventoryBalance
-from datetime import datetime, timezone
-
-
-
 from app.models.surplus_listing import SurplusListing
 
 
 def get_expired_batches(db: Session):
+    """
+    Retrieve expired flower batches that still have
+    available or reserved inventory.
+    """
     today = date.today()
 
     stmt = (
@@ -32,6 +32,10 @@ def get_expired_batches(db: Session):
         )
         .where(
             FlowerBatch.expiry_date < today,
+            or_(
+                InventoryBalance.available_quantity > 0,
+                InventoryBalance.reserved_quantity > 0,
+            ),
         )
         .order_by(FlowerBatch.expiry_date)
     )
@@ -51,14 +55,16 @@ def get_expired_batches(db: Session):
         for row in rows
     ]
 
-def expire_surplus_listings(
-    db: Session,
-):
+
+def expire_surplus_listings(db: Session):
+    """
+    Mark ACTIVE surplus listings as EXPIRED when
+    the associated flower batch has expired or
+    the listing's own expiry time has passed.
+    """
     today = date.today()
     now = datetime.now(timezone.utc)
 
-    # Expire listings if either the batch has expired
-    # or the listing's own expiry time has passed.
     expired_listing_ids = (
         select(SurplusListing.id)
         .join(
@@ -74,19 +80,24 @@ def expire_surplus_listings(
         )
     )
 
-    result = db.execute(
-        update(SurplusListing)
-        .where(
-            SurplusListing.id.in_(expired_listing_ids)
+    try:
+        result = db.execute(
+            update(SurplusListing)
+            .where(
+                SurplusListing.id.in_(expired_listing_ids)
+            )
+            .values(status="EXPIRED")
+            .execution_options(
+                synchronize_session=False
+            )
         )
-        .values(status="EXPIRED")
-        .execution_options(
-            synchronize_session=False
-        )
-    )
 
-    db.commit()
+        db.commit()
 
-    return {
-        "expired_listings": result.rowcount
-    }
+        return {
+            "expired_listings": result.rowcount
+        }
+
+    except Exception:
+        db.rollback()
+        raise

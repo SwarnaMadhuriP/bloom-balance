@@ -19,7 +19,7 @@ from app.models.flower_batch import FlowerBatch
 from app.models.organization import Organization
 from app.models.inventory_location import InventoryLocation
 from app.models.inventory_balance import InventoryBalance
-
+from decimal import Decimal
 
 database_url = os.environ["DATABASE_URL"]
 parts = urlsplit(database_url)
@@ -121,12 +121,13 @@ def order_scenario(db_session):
 
     # Create batch and storage location
     batch = FlowerBatch(
-        flower_id=flower.id,
-        grower_organization_id=grower.id,
-        harvest_date=date.today(),
-        expiry_date=date.today() + timedelta(days=7),
-        initial_quantity=300,
-    )
+    flower_id=flower.id,
+    grower_organization_id=grower.id,
+    harvest_date=date.today(),
+    expiry_date=date.today() + timedelta(days=7),
+    initial_quantity=300,
+    price_per_unit=Decimal("15.00"),
+)
 
     location = InventoryLocation(
         organization_id=grower.id,

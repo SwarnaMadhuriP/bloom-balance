@@ -94,6 +94,21 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  waste-analytics-consumer:
+    build:
+      context: ./backend
+    command: python -u -m app.workers.waste_analytics_consumer
+    env_file:
+      - .env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - db
+      - kafka
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   kafka_data:
