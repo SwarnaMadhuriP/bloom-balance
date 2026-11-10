@@ -10,17 +10,20 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.models.processed_event import ProcessedEvent
 from app.models.waste_analytics import WasteAnalytics
 from app.workers import waste_analytics_consumer
+from datetime import datetime, timezone
 
 
-def make_event(organization_id, event_id=None, quantity=10):
+
+def make_event(organization_id, event_id=None, quantity=10, unit="stem"):
     return {
         "event_id": str(event_id or uuid.uuid4()),
         "event_type": "InventoryWasteRecorded",
         "organization_id": str(organization_id),
         "quantity": quantity,
+        "unit": unit,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
         "reason": "EXPIRED",
     }
-
 
 def test_waste_event_updates_analytics(
     db_session, monkeypatch, order_scenario
@@ -173,4 +176,50 @@ def test_dlq_delivery_failure_raises():
         )
 
     producer.produce.assert_called_once()
+
+
+def test_waste_analytics_separates_units(
+    db_session, monkeypatch, order_scenario
+):
+    monkeypatch.setattr(
+        waste_analytics_consumer,
+        "SessionLocal",
+        lambda: nullcontext(db_session),
+    )
+
+    organization_id = order_scenario["grower"].id
+
+    # Two different events for the same organization and date.
+    stem_event = make_event(
+        organization_id,
+        quantity=20,
+        unit="stem",
+    )
+
+    kg_event = make_event(
+        organization_id,
+        quantity=5,
+        unit="kg",
+    )
+
+    waste_analytics_consumer.process_event(stem_event)
+    waste_analytics_consumer.process_event(kg_event)
+
+    analytics = db_session.scalars(
+        select(WasteAnalytics).where(
+            WasteAnalytics.organization_id == organization_id,
+            WasteAnalytics.waste_date == date.today(),
+        )
+    ).all()
+
+    totals_by_unit = {
+        row.unit: row.total_quantity
+        for row in analytics
+    }
+
+    assert totals_by_unit == {
+        "stem": 20,
+        "kg": 5,
+    }
+
 

@@ -4,7 +4,7 @@ import logging
 import os
 import time
 import uuid
-from datetime import date
+from datetime import datetime, timezone
 
 from confluent_kafka import Consumer, Producer, KafkaException
 from sqlalchemy.dialects.postgresql import insert
@@ -13,6 +13,7 @@ from sqlalchemy.exc import OperationalError
 from app.database import SessionLocal
 from app.models.processed_event import ProcessedEvent
 from app.models.waste_analytics import WasteAnalytics
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,6 +28,8 @@ GROUP_ID = "bloombalance-waste-analytics"
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 2
 
+VALID_UNITS = {"stem", "bunch", "kg"}
+
 
 def process_event(event):
     if not isinstance(event, dict):
@@ -37,15 +40,31 @@ def process_event(event):
 
     event_id = uuid.UUID(event["event_id"])
     organization_id = uuid.UUID(event["organization_id"])
-    quantity = int(event["quantity"])
 
-    if quantity <= 0:
-        raise ValueError("Waste quantity must be positive")
+    # Reject fractional, boolean, and malformed quantities.
+    quantity = event["quantity"]
 
-    waste_date = date.today()
+    if type(quantity) is not int or quantity <= 0:
+        raise ValueError("Waste quantity must be a positive integer")
+
+    # Each waste event must identify its measurement unit.
+    unit = event["unit"]
+
+    if not isinstance(unit, str) or unit not in VALID_UNITS:
+        raise ValueError(f"Invalid waste unit: {unit}")
+
+    # Use the event timestamp rather than processing time.
+    occurred_at = datetime.fromisoformat(event["occurred_at"])
+
+    if occurred_at.tzinfo is None:
+        raise ValueError("Event timestamp must include a timezone")
+
+    # Reporting dates are currently based on UTC.
+    waste_date = occurred_at.astimezone(timezone.utc).date()
 
     with SessionLocal() as db:
         try:
+            # 1. Claim the event for idempotent processing.
             claim = (
                 insert(ProcessedEvent)
                 .values(
@@ -61,20 +80,25 @@ def process_event(event):
             claimed_id = db.scalar(claim)
 
             if claimed_id is None:
-                logger.info("Duplicate event %s. Skipping.", event_id)
+                logger.info(
+                    "Duplicate event %s. Skipping.",
+                    event_id,
+                )
                 db.commit()
                 return
 
+            # 2. Aggregate waste by organization, date, and unit.
             stmt = (
                 insert(WasteAnalytics)
                 .values(
                     id=uuid.uuid4(),
                     organization_id=organization_id,
                     waste_date=waste_date,
+                    unit=unit,
                     total_quantity=quantity,
                 )
                 .on_conflict_do_update(
-                    constraint="uq_waste_analytics_org_date",
+                    constraint="uq_waste_analytics_org_date_unit",
                     set_={
                         "total_quantity":
                             WasteAnalytics.total_quantity + quantity
@@ -83,13 +107,21 @@ def process_event(event):
             )
 
             db.execute(stmt)
+
+            # 3. Commit both operations atomically.
             db.commit()
-            logger.info("Processed waste event %s", event_id)
+
+            logger.info(
+                "Processed waste event %s: %s %s on %s",
+                event_id,
+                quantity,
+                unit,
+                waste_date,
+            )
 
         except Exception:
             db.rollback()
             raise
-
 
 
 def publish_to_dlq(producer, message, error):
@@ -172,9 +204,13 @@ def start_consumer():
 
             for attempt in range(1, MAX_RETRIES + 1):
                 try:
-                    event = json.loads(message.value().decode("utf-8"))
+                    event = json.loads(
+                        message.value().decode("utf-8")
+                    )
+
                     process_event(event)
 
+                    # Commit Kafka offset only after DB commit.
                     consumer.commit(
                         message=message,
                         asynchronous=False,
@@ -184,6 +220,8 @@ def start_consumer():
                 except (ValueError, KeyError, TypeError) as exc:
                     # Invalid payload: retrying won't fix it.
                     publish_to_dlq(producer, message, exc)
+
+                    # Commit only after confirmed DLQ delivery.
                     consumer.commit(
                         message=message,
                         asynchronous=False,
@@ -193,12 +231,12 @@ def start_consumer():
                 except OperationalError:
                     logger.exception(
                         "Temporary database failure, attempt %s/%s",
-                        attempt, MAX_RETRIES,
+                        attempt,
+                        MAX_RETRIES,
                     )
 
                     if attempt == MAX_RETRIES:
-                        # Don't DLQ temporary infrastructure failures.
-                        # Stop without committing so Kafka can redeliver.
+                        # Leave offset uncommitted for redelivery.
                         raise
 
                     time.sleep(RETRY_DELAY_SECONDS)

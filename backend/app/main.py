@@ -16,6 +16,7 @@ from app.api.bloomtrace_analytics import (
     router as bloomtrace_analytics_router,
 )
 from app.api.flower_expiry import router as flower_expiry_router
+from app.api.waste_analytics import router as waste_analytics_router
 
 
 
@@ -33,6 +34,7 @@ app.include_router(surplus_router)
 app.include_router(waste_records_router)
 app.include_router(bloomtrace_analytics_router)
 app.include_router(flower_expiry_router)
+app.include_router(waste_analytics_router)
 
 
 @app.get("/")
