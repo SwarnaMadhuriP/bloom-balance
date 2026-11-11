@@ -1,15 +1,15 @@
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.flower import Flower
 from app.schemas.flower import FlowerCreate, FlowerResponse
-import uuid
-from sqlalchemy import select
 
 router = APIRouter(prefix="/flowers", tags=["Flowers"])
 
@@ -24,7 +24,6 @@ def create_flower(
     db: Annotated[Session, Depends(get_db)],
 ):
     flower = Flower(**flower_data.model_dump())
-
     db.add(flower)
 
     try:
@@ -37,17 +36,16 @@ def create_flower(
         )
 
     db.refresh(flower)
-
     return flower
+
 
 @router.get("", response_model=list[FlowerResponse])
 def get_flowers(
     db: Annotated[Session, Depends(get_db)],
 ):
-    statement = select(Flower)
-    flowers = db.scalars(statement).all()
+    statement = select(Flower).order_by(Flower.name, Flower.variety)
+    return db.scalars(statement).all()
 
-    return flowers
 
 @router.get("/{flower_id}", response_model=FlowerResponse)
 def get_flower(

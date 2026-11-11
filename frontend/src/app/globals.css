@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+:root {
+  --background: #faf7f0;
+  --foreground: #344e41;
+}
+
+@theme inline {
+  /* Base colors */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  /* BloomBalance botanical palette */
+  --color-sage: #8da58a;
+  --color-forest: #344e41;
+  --color-cream: #faf7f0;
+  --color-blush: #f4d9d5;
+  --color-rose: #d98f8f;
+  --color-lavender: #e9e1f2;
+  --color-muted-green: #e5eddf;
+
+  /* Fonts */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@keyframes village-appear {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+#village {
+  animation: village-appear 1.2s ease-out both;
+}
+
+html {
+  scroll-behavior: smooth;
+}
