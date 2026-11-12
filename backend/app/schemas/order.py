@@ -37,7 +37,10 @@ class OrderItemResponse(BaseModel):
     flower_id: uuid.UUID
     quantity: int
     unit_price: Decimal
-
+    flower_name: str | None = None
+    flower_variety: str | None = None
+    flower_color: str | None = None
+    flower_unit: str | None = None
 
 class OrderResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -49,3 +52,5 @@ class OrderResponse(BaseModel):
     total_amount: Decimal
     created_at: datetime
     items: list[OrderItemResponse]
+    seller_name: str | None = None
+    buyer_name: str | None = None

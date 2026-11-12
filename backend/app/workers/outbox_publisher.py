@@ -17,7 +17,14 @@ logger = logging.getLogger(__name__)
 
 
 EVENT_TOPICS = {
+    # Order lifecycle events
     "OrderAccepted": "bloombalance.orders",
+    "OrderPreparing": "bloombalance.orders",
+    "OrderDispatched": "bloombalance.orders",
+    "OrderDelivered": "bloombalance.orders",
+    "OrderCancelled": "bloombalance.orders",
+
+    # Inventory waste events
     "InventoryWasteRecorded": "bloombalance.inventory.waste",
 }
 

@@ -1,10 +1,10 @@
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.models.flower import Flower
@@ -16,14 +16,14 @@ from app.models.order_allocation import OrderAllocation
 from app.models.inventory_balance import InventoryBalance
 from app.models.inventory_location import InventoryLocation
 from app.models.inventory_movement import InventoryMovement
-
-from app.schemas.order import OrderCreate
 from app.models.outbox_event import OutboxEvent
-from datetime import datetime, timezone
-
 from app.models.surplus_listing import SurplusListing
+from app.schemas.order import OrderCreate
 
 
+# ============================================================
+# HELPERS
+# ============================================================
 
 def get_locked_order(db: Session, order_id: uuid.UUID):
     order = db.scalar(
@@ -42,11 +42,39 @@ def require_status(order: Order, expected: str):
     if order.status != expected:
         raise HTTPException(
             409,
-            f"Order must be {expected}; current status is {order.status}"
+            f"Order must be {expected}; current status is {order.status}",
         )
 
 
-def get_order_allocations(db: Session, order_id: uuid.UUID):
+def add_order_event(
+    db: Session,
+    order: Order,
+    event_type: str,
+):
+    """Insert an outbox event in the current transaction."""
+    event = OutboxEvent(
+        aggregate_id=order.id,
+        event_type=event_type,
+        payload={
+            "event_type": event_type,
+            "order_id": str(order.id),
+            "seller_organization_id": str(
+                order.seller_organization_id
+            ),
+            "buyer_organization_id": str(
+                order.buyer_organization_id
+            ),
+        },
+        status="PENDING",
+    )
+
+    db.add(event)
+
+
+def get_order_allocations(
+    db: Session,
+    order_id: uuid.UUID,
+):
     return db.scalars(
         select(OrderAllocation)
         .join(
@@ -64,8 +92,8 @@ def get_order_allocations(db: Session, order_id: uuid.UUID):
 
 def lock_allocation_balances(db: Session, allocations):
     keys = sorted({
-        (a.batch_id, a.location_id)
-        for a in allocations
+        (allocation.batch_id, allocation.location_id)
+        for allocation in allocations
     })
 
     balances = {}
@@ -81,7 +109,10 @@ def lock_allocation_balances(db: Session, allocations):
         )
 
         if balance is None:
-            raise HTTPException(409, "Inventory balance not found")
+            raise HTTPException(
+                409,
+                "Inventory balance not found",
+            )
 
         balances[(batch_id, location_id)] = balance
 
@@ -92,39 +123,68 @@ def allocation_totals(allocations):
     totals = {}
 
     for allocation in allocations:
-        key = (allocation.batch_id, allocation.location_id)
-        totals[key] = totals.get(key, 0) + allocation.quantity
+        key = (
+            allocation.batch_id,
+            allocation.location_id,
+        )
+
+        totals[key] = (
+            totals.get(key, 0) + allocation.quantity
+        )
 
     return totals
 
 
+# ============================================================
+# CREATE ORDER
+# ============================================================
+
 def create_order(db: Session, request: OrderCreate):
     try:
         buyer = db.get(
-            Organization, request.buyer_organization_id
+            Organization,
+            request.buyer_organization_id,
         )
+
         seller = db.get(
-            Organization, request.seller_organization_id
+            Organization,
+            request.seller_organization_id,
         )
 
         if buyer is None:
-            raise HTTPException(404, "Buyer organization not found")
+            raise HTTPException(
+                404,
+                "Buyer organization not found",
+            )
 
         if seller is None:
-            raise HTTPException(404, "Seller organization not found")
+            raise HTTPException(
+                404,
+                "Seller organization not found",
+            )
 
         if buyer.id == seller.id:
             raise HTTPException(
-                400, "Buyer and seller must be different"
+                400,
+                "Buyer and seller must be different",
             )
 
         if buyer.organization_type != "florist":
-            raise HTTPException(400, "Buyer must be a florist")
+            raise HTTPException(
+                400,
+                "Buyer must be a florist",
+            )
 
         if seller.organization_type != "grower":
-            raise HTTPException(400, "Seller must be a grower")
+            raise HTTPException(
+                400,
+                "Seller must be a grower",
+            )
 
-        flower_ids = {item.flower_id for item in request.items}
+        flower_ids = {
+            item.flower_id
+            for item in request.items
+        }
 
         existing_ids = set(
             db.scalars(
@@ -135,7 +195,8 @@ def create_order(db: Session, request: OrderCreate):
 
         if existing_ids != flower_ids:
             raise HTTPException(
-                404, "One or more flowers do not exist"
+                404,
+                "One or more flowers do not exist",
             )
 
         total = sum(
@@ -165,6 +226,7 @@ def create_order(db: Session, request: OrderCreate):
                 quantity=item.quantity,
                 unit_price=item.unit_price,
             )
+
             db.add(order_item)
             items.append(order_item)
 
@@ -174,8 +236,12 @@ def create_order(db: Session, request: OrderCreate):
 
         return {
             "id": order.id,
-            "buyer_organization_id": order.buyer_organization_id,
-            "seller_organization_id": order.seller_organization_id,
+            "buyer_organization_id": (
+                order.buyer_organization_id
+            ),
+            "seller_organization_id": (
+                order.seller_organization_id
+            ),
             "status": order.status,
             "total_amount": order.total_amount,
             "created_at": order.created_at,
@@ -187,7 +253,9 @@ def create_order(db: Session, request: OrderCreate):
         raise
 
 
-
+# ============================================================
+# ACCEPT ORDER
+# ============================================================
 
 def accept_order(db: Session, order_id: uuid.UUID):
     try:
@@ -201,18 +269,23 @@ def accept_order(db: Session, order_id: uuid.UUID):
         ).all()
 
         if not items:
-            raise HTTPException(409, "Order has no items")
+            raise HTTPException(
+                409,
+                "Order has no items",
+            )
 
-        flower_ids = {item.flower_id for item in items}
+        flower_ids = {
+            item.flower_id
+            for item in items
+        }
+
         surplus_ids = {
             item.surplus_listing_id
             for item in items
             if item.surplus_listing_id is not None
         }
 
-        # Lock all relevant flower batches in a stable order.
-        # This also coordinates with listing creation, which
-        # locks the corresponding FlowerBatch.
+        # Lock relevant batches in a stable order.
         batches = db.scalars(
             select(FlowerBatch)
             .where(
@@ -224,26 +297,37 @@ def accept_order(db: Session, order_id: uuid.UUID):
             .with_for_update()
         ).all()
 
-        batch_by_id = {batch.id: batch for batch in batches}
-
-        # Lock the surplus listings referenced by this order.
-        listings = db.scalars(
-            select(SurplusListing)
-            .where(SurplusListing.id.in_(surplus_ids))
-            .order_by(SurplusListing.id)
-            .with_for_update()
-        ).all() if surplus_ids else []
-
-        listing_by_id = {
-            listing.id: listing for listing in listings
+        batch_by_id = {
+            batch.id: batch
+            for batch in batches
         }
 
-        # Lock inventory rows.
+        # Lock surplus listings.
+        listings = (
+            db.scalars(
+                select(SurplusListing)
+                .where(
+                    SurplusListing.id.in_(surplus_ids)
+                )
+                .order_by(SurplusListing.id)
+                .with_for_update()
+            ).all()
+            if surplus_ids
+            else []
+        )
+
+        listing_by_id = {
+            listing.id: listing
+            for listing in listings
+        }
+
+        # Lock inventory balances.
         stock_rows = db.execute(
             select(InventoryBalance, FlowerBatch)
             .join(
                 FlowerBatch,
-                InventoryBalance.batch_id == FlowerBatch.id,
+                InventoryBalance.batch_id
+                == FlowerBatch.id,
             )
             .join(
                 InventoryLocation,
@@ -270,25 +354,27 @@ def accept_order(db: Session, order_id: uuid.UUID):
 
         for balance, batch in stock_rows:
             stock_by_flower.setdefault(
-                batch.flower_id, []
+                batch.flower_id,
+                [],
             ).append(balance)
 
             stock_by_batch.setdefault(
-                batch.id, []
+                batch.id,
+                [],
             ).append(balance)
 
-        # Pending surplus orders have already reduced
-        # listing.remaining_quantity. Both pending purchases
-        # and unpurchased active listing capacity need protection.
-        #
-        # Count commitments for all non-expired batches.
+        # Protect quantities committed to active
+        # surplus listings and pending surplus orders.
         now = datetime.now(timezone.utc)
 
         active_listing_rows = db.execute(
             select(
                 SurplusListing.batch_id,
                 func.coalesce(
-                    func.sum(SurplusListing.remaining_quantity), 0
+                    func.sum(
+                        SurplusListing.remaining_quantity
+                    ),
+                    0,
                 ),
             )
             .where(
@@ -303,20 +389,27 @@ def accept_order(db: Session, order_id: uuid.UUID):
 
         protected_by_batch = {
             batch_id: int(quantity)
-            for batch_id, quantity in active_listing_rows
+            for batch_id, quantity
+            in active_listing_rows
         }
 
-        # Include pending surplus purchases as commitments.
         pending_rows = db.execute(
             select(
                 SurplusListing.batch_id,
-                func.coalesce(func.sum(OrderItem.quantity), 0),
+                func.coalesce(
+                    func.sum(OrderItem.quantity),
+                    0,
+                ),
             )
             .join(
                 OrderItem,
-                OrderItem.surplus_listing_id == SurplusListing.id,
+                OrderItem.surplus_listing_id
+                == SurplusListing.id,
             )
-            .join(Order, Order.id == OrderItem.order_id)
+            .join(
+                Order,
+                Order.id == OrderItem.order_id,
+            )
             .where(
                 SurplusListing.batch_id.in_(
                     list(batch_by_id.keys())
@@ -332,7 +425,7 @@ def accept_order(db: Session, order_id: uuid.UUID):
                 + int(quantity)
             )
 
-        # Reserve surplus items before regular items.
+        # Allocate surplus purchases first.
         ordered_items = sorted(
             items,
             key=lambda item: (
@@ -351,50 +444,67 @@ def accept_order(db: Session, order_id: uuid.UUID):
 
                 if listing is None:
                     raise HTTPException(
-                        409, "Surplus listing not found"
+                        409,
+                        "Surplus listing not found",
                     )
 
-                batch = batch_by_id.get(listing.batch_id)
+                batch = batch_by_id.get(
+                    listing.batch_id
+                )
 
                 if (
                     batch is None
                     or batch.flower_id != item.flower_id
                 ):
                     raise HTTPException(
-                        409, "Invalid surplus batch"
+                        409,
+                        "Invalid surplus batch",
                     )
 
-                eligible_balances = stock_by_batch.get(
-                    listing.batch_id, []
+                eligible_balances = (
+                    stock_by_batch.get(
+                        listing.batch_id,
+                        [],
+                    )
                 )
 
-                # This pending order is being accepted,
-                # so release its own pending commitment.
-                protected_by_batch[listing.batch_id] -= (
-                    item.quantity
-                )
+                # Release this order's own
+                # pending surplus commitment.
+                protected_by_batch[
+                    listing.batch_id
+                ] -= item.quantity
 
             else:
-                eligible_balances = stock_by_flower.get(
-                    item.flower_id, []
+                eligible_balances = (
+                    stock_by_flower.get(
+                        item.flower_id,
+                        [],
+                    )
                 )
 
             for balance in eligible_balances:
                 if remaining == 0:
                     break
 
-                protected = protected_by_batch.get(
-                    balance.batch_id, 0
+                protected = (
+                    protected_by_batch.get(
+                        balance.batch_id,
+                        0,
+                    )
                 )
 
                 batch_available = sum(
                     row.available_quantity
                     for row in stock_by_batch.get(
-                        balance.batch_id, []
+                        balance.batch_id,
+                        [],
                     )
                 )
 
-                usable = max(0, batch_available - protected)
+                usable = max(
+                    0,
+                    batch_available - protected,
+                )
 
                 allocated = min(
                     remaining,
@@ -420,7 +530,9 @@ def accept_order(db: Session, order_id: uuid.UUID):
                 db.add(
                     InventoryMovement(
                         batch_id=balance.batch_id,
-                        source_location_id=balance.location_id,
+                        source_location_id=(
+                            balance.location_id
+                        ),
                         destination_location_id=None,
                         movement_type="RESERVATION",
                         quantity=allocated,
@@ -440,28 +552,23 @@ def accept_order(db: Session, order_id: uuid.UUID):
                     ),
                 )
 
+        # Order and outbox event commit together.
         order.status = "ACCEPTED"
 
-        event = OutboxEvent(
-            aggregate_id=order.id,
-            event_type="OrderAccepted",
-            payload={
-                "event_type": "OrderAccepted",
-                "order_id": str(order.id),
-                "seller_organization_id": str(
-                    order.seller_organization_id
-                ),
-            },
-            status="PENDING",
+        add_order_event(
+            db,
+            order,
+            "OrderAccepted",
         )
 
-        db.add(event)
         db.commit()
 
         return {
             "order_id": str(order.id),
             "status": "ACCEPTED",
-            "message": "Order accepted and inventory reserved",
+            "message": (
+                "Order accepted and inventory reserved"
+            ),
         }
 
     except Exception:
@@ -469,6 +576,9 @@ def accept_order(db: Session, order_id: uuid.UUID):
         raise
 
 
+# ============================================================
+# PREPARE ORDER
+# ============================================================
 
 def prepare_order(db: Session, order_id: uuid.UUID):
     try:
@@ -476,6 +586,13 @@ def prepare_order(db: Session, order_id: uuid.UUID):
         require_status(order, "ACCEPTED")
 
         order.status = "PREPARING"
+
+        add_order_event(
+            db,
+            order,
+            "OrderPreparing",
+        )
+
         db.commit()
 
         return {
@@ -488,6 +605,9 @@ def prepare_order(db: Session, order_id: uuid.UUID):
         raise
 
 
+# ============================================================
+# CANCEL ORDER
+# ============================================================
 
 def cancel_order(db: Session, order_id: uuid.UUID):
     try:
@@ -507,7 +627,8 @@ def cancel_order(db: Session, order_id: uuid.UUID):
             ).all()
 
             surplus_items = [
-                item for item in items
+                item
+                for item in items
                 if item.surplus_listing_id is not None
             ]
 
@@ -517,22 +638,32 @@ def cancel_order(db: Session, order_id: uuid.UUID):
                     for item in surplus_items
                 })
 
-                # Lock the associated batches first.
+                # Lock batches before listings.
                 batch_ids = db.scalars(
                     select(SurplusListing.batch_id)
-                    .where(SurplusListing.id.in_(listing_ids))
+                    .where(
+                        SurplusListing.id.in_(
+                            listing_ids
+                        )
+                    )
                 ).all()
 
                 db.scalars(
                     select(FlowerBatch)
-                    .where(FlowerBatch.id.in_(batch_ids))
+                    .where(
+                        FlowerBatch.id.in_(batch_ids)
+                    )
                     .order_by(FlowerBatch.id)
                     .with_for_update()
                 ).all()
 
                 listings = db.scalars(
                     select(SurplusListing)
-                    .where(SurplusListing.id.in_(listing_ids))
+                    .where(
+                        SurplusListing.id.in_(
+                            listing_ids
+                        )
+                    )
                     .order_by(SurplusListing.id)
                     .with_for_update()
                 ).all()
@@ -555,12 +686,15 @@ def cancel_order(db: Session, order_id: uuid.UUID):
                             "Surplus listing no longer exists",
                         )
 
-                    # Only restore to an eligible listing.
+                    # Restore only eligible listings.
                     if (
-                        listing.status in ("ACTIVE", "SOLD_OUT")
+                        listing.status
+                        in ("ACTIVE", "SOLD_OUT")
                         and listing.expires_at > now
                     ):
-                        listing.remaining_quantity += item.quantity
+                        listing.remaining_quantity += (
+                            item.quantity
+                        )
 
                         if (
                             listing.remaining_quantity
@@ -575,26 +709,40 @@ def cancel_order(db: Session, order_id: uuid.UUID):
                             listing.status = "ACTIVE"
 
         elif order.status == "ACCEPTED":
-            allocations = get_order_allocations(db, order.id)
+            allocations = get_order_allocations(
+                db,
+                order.id,
+            )
 
             if not allocations:
                 raise HTTPException(
-                    409, "Accepted order has no allocations"
+                    409,
+                    "Accepted order has no allocations",
                 )
 
             balances = lock_allocation_balances(
-                db, allocations
+                db,
+                allocations,
             )
-            totals = allocation_totals(allocations)
+
+            totals = allocation_totals(
+                allocations
+            )
 
             for key, quantity in totals.items():
-                if balances[key].reserved_quantity < quantity:
+                if (
+                    balances[key].reserved_quantity
+                    < quantity
+                ):
                     raise HTTPException(
-                        409, "Insufficient reserved inventory"
+                        409,
+                        "Insufficient reserved inventory",
                     )
 
+            # Restore reserved inventory.
             for key, quantity in totals.items():
                 balance = balances[key]
+
                 balance.available_quantity += quantity
                 balance.reserved_quantity -= quantity
 
@@ -603,15 +751,26 @@ def cancel_order(db: Session, order_id: uuid.UUID):
                     InventoryMovement(
                         batch_id=allocation.batch_id,
                         source_location_id=None,
-                        destination_location_id=allocation.location_id,
+                        destination_location_id=(
+                            allocation.location_id
+                        ),
                         movement_type="RELEASE",
                         quantity=allocation.quantity,
                         reference_type="ORDER_ITEM",
-                        reference_id=allocation.order_item_id,
+                        reference_id=(
+                            allocation.order_item_id
+                        ),
                     )
                 )
 
         order.status = "CANCELLED"
+
+        add_order_event(
+            db,
+            order,
+            "OrderCancelled",
+        )
+
         db.commit()
 
         return {
@@ -625,26 +784,43 @@ def cancel_order(db: Session, order_id: uuid.UUID):
         raise
 
 
+# ============================================================
+# DISPATCH ORDER
+# ============================================================
 
 def dispatch_order(db: Session, order_id: uuid.UUID):
     try:
         order = get_locked_order(db, order_id)
         require_status(order, "PREPARING")
 
-        allocations = get_order_allocations(db, order.id)
+        allocations = get_order_allocations(
+            db,
+            order.id,
+        )
 
         if not allocations:
             raise HTTPException(
-                409, "Order has no inventory allocations"
+                409,
+                "Order has no inventory allocations",
             )
 
-        balances = lock_allocation_balances(db, allocations)
-        totals = allocation_totals(allocations)
+        balances = lock_allocation_balances(
+            db,
+            allocations,
+        )
+
+        totals = allocation_totals(
+            allocations
+        )
 
         for key, quantity in totals.items():
-            if balances[key].reserved_quantity < quantity:
+            if (
+                balances[key].reserved_quantity
+                < quantity
+            ):
                 raise HTTPException(
-                    409, "Insufficient reserved inventory"
+                    409,
+                    "Insufficient reserved inventory",
                 )
 
         # Reserved stock leaves the warehouse.
@@ -655,7 +831,9 @@ def dispatch_order(db: Session, order_id: uuid.UUID):
             db.add(
                 InventoryMovement(
                     batch_id=allocation.batch_id,
-                    source_location_id=allocation.location_id,
+                    source_location_id=(
+                        allocation.location_id
+                    ),
                     destination_location_id=None,
                     movement_type="DISPATCH",
                     quantity=allocation.quantity,
@@ -665,6 +843,13 @@ def dispatch_order(db: Session, order_id: uuid.UUID):
             )
 
         order.status = "DISPATCHED"
+
+        add_order_event(
+            db,
+            order,
+            "OrderDispatched",
+        )
+
         db.commit()
 
         return {
@@ -678,12 +863,23 @@ def dispatch_order(db: Session, order_id: uuid.UUID):
         raise
 
 
+# ============================================================
+# DELIVER ORDER
+# ============================================================
+
 def deliver_order(db: Session, order_id: uuid.UUID):
     try:
         order = get_locked_order(db, order_id)
         require_status(order, "DISPATCHED")
 
         order.status = "DELIVERED"
+
+        add_order_event(
+            db,
+            order,
+            "OrderDelivered",
+        )
+
         db.commit()
 
         return {

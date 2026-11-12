@@ -10,8 +10,7 @@ from sqlalchemy import (
     Numeric,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
-
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
@@ -64,3 +63,8 @@ class OrderItem(Base):
         Numeric(10, 2),
         nullable=False
     )
+
+    order: Mapped["Order"] = relationship(
+    "Order",
+    back_populates="items",
+)

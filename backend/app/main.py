@@ -18,7 +18,7 @@ from app.api.bloomtrace_analytics import (
 from app.api.flower_expiry import router as flower_expiry_router
 from app.api.waste_analytics import router as waste_analytics_router
 from fastapi.middleware.cors import CORSMiddleware
-
+from app.api.notifications import router as notifications_router
 
 
 
@@ -46,6 +46,7 @@ app.include_router(waste_records_router)
 app.include_router(bloomtrace_analytics_router)
 app.include_router(flower_expiry_router)
 app.include_router(waste_analytics_router)
+app.include_router(notifications_router)
 
 
 @app.get("/")

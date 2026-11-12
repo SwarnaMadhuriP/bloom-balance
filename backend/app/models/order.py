@@ -13,7 +13,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
@@ -81,3 +81,9 @@ class Order(Base):
         onupdate=func.now(),
         nullable=False
     )
+
+    items: Mapped[list["OrderItem"]] = relationship(
+    "OrderItem",
+    back_populates="order",
+    lazy="selectin",
+)

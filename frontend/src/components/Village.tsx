@@ -13,7 +13,7 @@ const destinations = [
   },
   {
     name: "Trade",
-    href: "/marketplace",
+    href: "/florist/marketplace",
     description: "Explore the flower marketplace",
     left: "39%",
     top: "54%",

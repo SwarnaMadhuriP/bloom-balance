@@ -23,14 +23,41 @@ logger = logging.getLogger(__name__)
 TOPIC = "bloombalance.orders"
 GROUP_ID = "bloombalance-notifications"
 
+NOTIFICATION_CONFIG = {
+    "OrderAccepted": (
+        "ORDER_ACCEPTED",
+        "🌸 Your order has been accepted! "
+        "The grower will begin preparing your flowers.",
+    ),
+    "OrderPreparing": (
+        "ORDER_PREPARING",
+        "💐 Your flowers are being prepared with care.",
+    ),
+    "OrderDispatched": (
+        "ORDER_DISPATCHED",
+        "🚚 Your flowers are on their way!",
+    ),
+    "OrderDelivered": (
+        "ORDER_DELIVERED",
+        "🎉 Your flowers have arrived!",
+    ),
+    "OrderCancelled": (
+        "ORDER_CANCELLED",
+        "Your flower order has been cancelled.",
+    ),
+}
+
 
 def process_event(event):
-    if event.get("event_type") != "OrderAccepted":
+    event_type = event.get("event_type")
+
+    if event_type not in NOTIFICATION_CONFIG:
         return
 
-    # Ignore legacy test events without an event_id.
     if not event.get("event_id"):
-        logger.warning("Skipping event without event_id")
+        logger.warning(
+            "Skipping event without event_id"
+        )
         return
 
     event_id = uuid.UUID(event["event_id"])
@@ -38,8 +65,7 @@ def process_event(event):
 
     with SessionLocal() as db:
         try:
-            # Atomically claim the event.
-            stmt = (
+            claim_statement = (
                 insert(ProcessedEvent)
                 .values(
                     consumer_group=GROUP_ID,
@@ -51,7 +77,7 @@ def process_event(event):
                 .returning(ProcessedEvent.id)
             )
 
-            claimed_id = db.scalar(stmt)
+            claimed_id = db.scalar(claim_statement)
 
             if claimed_id is None:
                 logger.info(
@@ -62,7 +88,9 @@ def process_event(event):
                 return
 
             order = db.scalar(
-                select(Order).where(Order.id == order_id)
+                select(Order).where(
+                    Order.id == order_id
+                )
             )
 
             if order is None:
@@ -70,25 +98,28 @@ def process_event(event):
                     f"Order {order_id} does not exist"
                 )
 
+            notification_type, message = (
+                NOTIFICATION_CONFIG[event_type]
+            )
+
             notification = Notification(
                 organization_id=order.buyer_organization_id,
                 order_id=order.id,
                 event_id=event_id,
-                notification_type="ORDER_ACCEPTED",
-                message=(
-                    f"Your order {order.id} has been accepted! "
-                    "Your flowers are being prepared."
-                ),
+                notification_type=notification_type,
+                message=message,
                 status="UNREAD",
             )
 
             db.add(notification)
 
-            # Both records commit together.
+            # Commit notification and processed-event
+            # record in the same transaction.
             db.commit()
 
             logger.info(
-                "Notification created for order %s",
+                "Notification created: %s for order %s",
+                notification_type,
                 order_id,
             )
 
@@ -129,7 +160,8 @@ def start_consumer():
 
                 process_event(event)
 
-                # Commit Kafka offset only after DB success.
+                # Commit offset only after successful
+                # database processing.
                 consumer.commit(
                     message=message,
                     asynchronous=False,
@@ -142,7 +174,9 @@ def start_consumer():
                 )
 
             except Exception:
-                logger.exception("Event processing failed")
+                logger.exception(
+                    "Event processing failed"
+                )
                 raise
 
     finally:

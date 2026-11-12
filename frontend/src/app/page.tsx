@@ -23,7 +23,7 @@ export default function Home() {
 
         {/* Trade marketplace */}
         <Link
-          href="/marketplace"
+          href="/florist/marketplace"
           aria-label="Explore Trade marketplace"
           className="absolute left-[26%] top-[42%] h-[36%] w-[24%] cursor-pointer rounded-2xl transition-all hover:bg-white/10 focus-visible:outline-4 focus-visible:outline-green-700"
         />
