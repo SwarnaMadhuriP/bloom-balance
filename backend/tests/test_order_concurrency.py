@@ -2,9 +2,11 @@
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
+from decimal import Decimal
 from threading import Barrier
 
 from fastapi import HTTPException
+from sqlalchemy import select, func
 
 from app.models.flower import Flower
 from app.models.flower_batch import FlowerBatch
@@ -16,8 +18,6 @@ from app.models.order_item import OrderItem
 from app.models.order_allocation import OrderAllocation
 from app.services.order_service import accept_order
 
-from sqlalchemy import select, func
-
 
 def test_concurrent_orders_do_not_oversell(concurrency_db):
     SessionFactory = concurrency_db
@@ -28,10 +28,12 @@ def test_concurrent_orders_do_not_oversell(concurrency_db):
             name="Concurrency Grower",
             organization_type="grower",
         )
+
         florist = Organization(
             name="Concurrency Florist",
             organization_type="florist",
         )
+
         flower = Flower(
             name="Rose",
             variety="Red",
@@ -47,7 +49,9 @@ def test_concurrent_orders_do_not_oversell(concurrency_db):
             harvest_date=date.today(),
             expiry_date=date.today() + timedelta(days=7),
             initial_quantity=300,
+            price_per_unit=Decimal("10.00"),
         )
+
         location = InventoryLocation(
             organization_id=grower.id,
             name="Concurrency Warehouse",
@@ -63,6 +67,7 @@ def test_concurrent_orders_do_not_oversell(concurrency_db):
             available_quantity=300,
             reserved_quantity=0,
         )
+
         db.add(balance)
 
         order1 = Order(
@@ -70,6 +75,7 @@ def test_concurrent_orders_do_not_oversell(concurrency_db):
             seller_organization_id=grower.id,
             status="PENDING",
         )
+
         order2 = Order(
             buyer_organization_id=florist.id,
             seller_organization_id=grower.id,
@@ -110,6 +116,7 @@ def test_concurrent_orders_do_not_oversell(concurrency_db):
             try:
                 result = accept_order(db, order_id)
                 return result["status"]
+
             except HTTPException as exc:
                 return exc.status_code
 
@@ -132,10 +139,10 @@ def test_concurrent_orders_do_not_oversell(concurrency_db):
 
     # 4. Verify committed database state
     with SessionFactory() as db:
-        
         balance = db.get(
-        InventoryBalance,
-        (batch_id, location_id))
+            InventoryBalance,
+            (batch_id, location_id),
+        )
 
         assert balance is not None
         assert balance.available_quantity == 100

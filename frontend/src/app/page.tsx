@@ -37,7 +37,7 @@ export default function Home() {
 
         {/* BloomTrace analytics */}
         <Link
-          href="/bloomtrace"
+          href="/grow/bloomtrace"
           aria-label="Explore BloomTrace analytics"
           className="absolute left-[77%] top-[30%] h-[47%] w-[22%] cursor-pointer rounded-2xl transition-all hover:bg-white/10 focus-visible:outline-4 focus-visible:outline-green-700"
         />

@@ -147,7 +147,7 @@ def test_insufficient_inventory_rolls_back(
 
     assert response.status_code == 409
     assert (
-        "Insufficient inventory"
+        "Insufficient uncommitted inventory"
         in response.json()["detail"]
     )
 

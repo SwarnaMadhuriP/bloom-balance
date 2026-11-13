@@ -34,24 +34,68 @@ def get_bloomtrace_summary(
     total_records = int(totals[1])
 
     # 2. Group waste by reason.
+    
+    # Group waste by reason AND flower unit.
     reason_rows = db.execute(
         select(
             WasteRecord.reason,
-            func.sum(WasteRecord.quantity),
+            Flower.unit,
+            func.sum(WasteRecord.quantity).label("quantity"),
+        )
+        .select_from(WasteRecord)
+        .join(
+            FlowerBatch,
+            WasteRecord.batch_id == FlowerBatch.id,
+        )
+        .join(
+            Flower,
+            FlowerBatch.flower_id == Flower.id,
         )
         .where(
             WasteRecord.organization_id == organization_id
         )
-        .group_by(WasteRecord.reason)
-        .order_by(WasteRecord.reason)
+        .group_by(WasteRecord.reason, Flower.unit)
+        .order_by(WasteRecord.reason, Flower.unit)
     ).all()
 
     waste_by_reason = [
         {
             "reason": reason,
+            "unit": unit,
             "quantity": int(quantity),
         }
-        for reason, quantity in reason_rows
+        for reason, unit, quantity in reason_rows
+    ]
+
+ 
+    
+    # Group wasted quantities by their actual units.
+    unit_rows = db.execute(
+        select(
+            Flower.unit,
+            func.sum(WasteRecord.quantity).label("quantity"),
+        )
+        .join(
+            FlowerBatch,
+            WasteRecord.batch_id == FlowerBatch.id,
+        )
+        .join(
+            Flower,
+            FlowerBatch.flower_id == Flower.id,
+        )
+        .where(
+            WasteRecord.organization_id == organization_id
+        )
+        .group_by(Flower.unit)
+        .order_by(Flower.unit)
+    ).all()
+
+    waste_by_unit = [
+        {
+            "unit": unit,
+            "quantity": int(quantity),
+        }
+        for unit, quantity in unit_rows
     ]
 
     return {
@@ -59,6 +103,7 @@ def get_bloomtrace_summary(
         "total_wasted": total_wasted,
         "total_waste_records": total_records,
         "waste_by_reason": waste_by_reason,
+        "waste_by_unit": waste_by_unit,
     }
 
 
@@ -110,6 +155,7 @@ def get_waste_by_flower(
     ]
 
 
+
 def get_daily_waste_trends(
     db: Session,
     organization_id: uuid.UUID,
@@ -121,13 +167,12 @@ def get_daily_waste_trends(
             "start_date cannot be after end_date"
         )
 
-    waste_date = func.date(
-        WasteRecord.recorded_at
-    )
+    waste_date = func.date(WasteRecord.recorded_at)
 
     rows = db.execute(
         select(
             waste_date.label("date"),
+            Flower.unit.label("unit"),
             func.sum(WasteRecord.quantity).label(
                 "total_wasted"
             ),
@@ -135,23 +180,34 @@ def get_daily_waste_trends(
                 "record_count"
             ),
         )
+        .select_from(WasteRecord)
+        .join(
+            FlowerBatch,
+            WasteRecord.batch_id == FlowerBatch.id,
+        )
+        .join(
+            Flower,
+            FlowerBatch.flower_id == Flower.id,
+        )
         .where(
             WasteRecord.organization_id == organization_id,
             waste_date >= start_date,
             waste_date <= end_date,
         )
-        .group_by(waste_date)
-        .order_by(waste_date)
+        .group_by(waste_date, Flower.unit)
+        .order_by(waste_date, Flower.unit)
     ).all()
 
     return [
         {
             "date": recorded_date,
+            "unit": unit,
             "total_wasted": int(total_wasted),
             "record_count": int(record_count),
         }
-        for recorded_date, total_wasted, record_count in rows
+        for recorded_date, unit, total_wasted, record_count in rows
     ]
+
 
 
 def get_rescued_flowers(
@@ -181,11 +237,47 @@ def get_rescued_flowers(
         )
     ).one()
 
+    
+    unit_rows = db.execute(
+        select(
+            Flower.unit,
+            func.sum(OrderItem.quantity).label("quantity"),
+        )
+        .select_from(OrderItem)
+        .join(
+            Order,
+            OrderItem.order_id == Order.id,
+        )
+        .join(
+            SurplusListing,
+            OrderItem.surplus_listing_id == SurplusListing.id,
+        )
+        .join(
+            Flower,
+            OrderItem.flower_id == Flower.id,
+        )
+        .where(
+            Order.seller_organization_id == organization_id,
+            Order.status == "DELIVERED",
+        )
+        .group_by(Flower.unit)
+        .order_by(Flower.unit)
+    ).all()
+
+    rescued_by_unit = [
+        {
+            "unit": unit,
+            "quantity": int(quantity),
+        }
+        for unit, quantity in unit_rows
+    ]
+
     return {
         "organization_id": organization_id,
         "total_rescued": int(rows.total_rescued),
         "delivered_surplus_orders": int(
             rows.delivered_surplus_orders
         ),
+        "rescued_by_unit": rescued_by_unit,
     }
 

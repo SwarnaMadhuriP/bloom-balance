@@ -57,6 +57,24 @@ export default function GrowPage() {
           />
         ))}
 
+        {/* BloomTrace Analytics */}
+        <Link
+          href="/grow/bloomtrace"
+          aria-label="Open BloomTrace Analytics"
+          className="absolute bottom-[8%] right-[5%] z-20
+    rounded-full border border-[#d8dfcf]
+    bg-[#fffaf0]/95 px-5 py-3
+    font-serif text-sm font-semibold text-[#40583a]
+    shadow-lg transition-all duration-300
+    hover:-translate-y-1 hover:bg-white
+    hover:shadow-xl
+    focus-visible:outline-4
+    focus-visible:outline-[#344E41]
+    sm:text-base"
+        >
+          🌿 BloomTrace Analytics →
+        </Link>
+
         <Link
           href="/"
           aria-label="Back to BloomBalance village"
