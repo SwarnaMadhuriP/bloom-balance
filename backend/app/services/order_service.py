@@ -425,8 +425,9 @@ def accept_order(db: Session, order_id: uuid.UUID):
                 FlowerBatch.expiry_date >= date.today(),
             )
             .order_by(
-                InventoryBalance.batch_id,
-                InventoryBalance.location_id,
+                FlowerBatch.expiry_date.asc(),
+                InventoryBalance.batch_id.asc(),
+                InventoryBalance.location_id.asc(),
             )
             .with_for_update(of=InventoryBalance)
         ).all()
