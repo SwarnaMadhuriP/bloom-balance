@@ -3,6 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import axios from "axios";
+import {
+  ArrowLeft,
+  RefreshCw,
+  Leaf,
+  Flower2,
+  PackageCheck,
+  ClipboardList,
+  Package,
+  Sprout,
+} from "lucide-react";
 import { api } from "@/lib/api";
 import BloomTraceWasteChart from "@/components/BloomTraceWasteChart";
 
@@ -38,6 +48,8 @@ type WasteByFlower = {
   total_wasted: number;
 };
 
+const organizationId = process.env.NEXT_PUBLIC_GROWER_ORGANIZATION_ID;
+
 function getErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
@@ -53,7 +65,16 @@ function getErrorMessage(error: unknown): string {
 }
 
 function formatUnit(quantity: number, unit: string): string {
-  const label = unit === "stem" ? (quantity === 1 ? "stem" : "stems") : unit;
+  const label =
+    unit === "stem"
+      ? quantity === 1
+        ? "stem"
+        : "stems"
+      : unit === "bunch"
+      ? quantity === 1
+        ? "bunch"
+        : "bunches"
+      : unit;
 
   return `${quantity.toLocaleString("en-IN")} ${label}`;
 }
@@ -73,6 +94,15 @@ function formatReason(reason: string): string {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function groupByUnit<T extends { unit: string }>(
+  items: T[]
+): Record<string, T[]> {
+  return items.reduce<Record<string, T[]>>((groups, item) => {
+    (groups[item.unit] ??= []).push(item);
+    return groups;
+  }, {});
+}
+
 export default function BloomTracePage() {
   const [summary, setSummary] = useState<BloomTraceSummary | null>(null);
 
@@ -82,8 +112,6 @@ export default function BloomTracePage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
-  const organizationId = process.env.NEXT_PUBLIC_GROWER_ORGANIZATION_ID;
 
   const loadAnalytics = useCallback(async () => {
     setLoading(true);
@@ -97,21 +125,13 @@ export default function BloomTracePage() {
       const [summaryResponse, rescuedResponse, wasteByFlowerResponse] =
         await Promise.all([
           api.get<BloomTraceSummary>("/bloomtrace/analytics/summary", {
-            params: {
-              organization_id: organizationId,
-            },
+            params: { organization_id: organizationId },
           }),
-
           api.get<RescuedFlowers>("/bloomtrace/analytics/rescued-flowers", {
-            params: {
-              organization_id: organizationId,
-            },
+            params: { organization_id: organizationId },
           }),
-
           api.get<WasteByFlower[]>("/bloomtrace/analytics/waste-by-flower", {
-            params: {
-              organization_id: organizationId,
-            },
+            params: { organization_id: organizationId },
           }),
         ]);
 
@@ -123,7 +143,7 @@ export default function BloomTracePage() {
     } finally {
       setLoading(false);
     }
-  }, [organizationId]);
+  }, []);
 
   useEffect(() => {
     void loadAnalytics();
@@ -133,166 +153,180 @@ export default function BloomTracePage() {
     {
       title: "Flowers Wasted",
       value: summary ? formatQuantities(summary.waste_by_unit) : "—",
-      emoji: "🥀",
+      icon: Flower2,
       description: "All-time recorded flower waste",
+      background: "bg-[#FFF5F3]/90",
     },
     {
       title: "Surplus Delivered",
       value: rescued ? formatQuantities(rescued.rescued_by_unit) : "—",
-      emoji: "🌷",
+      icon: PackageCheck,
       description: "All-time delivered surplus quantities",
+      background: "bg-[#F1F8F2]/90",
     },
     {
       title: "Waste Records",
       value: summary
         ? summary.total_waste_records.toLocaleString("en-IN")
         : "—",
-      emoji: "🍂",
+      icon: ClipboardList,
       description: "Recorded waste incidents",
+      background: "bg-white/90",
     },
     {
       title: "Surplus Orders",
       value: rescued
         ? rescued.delivered_surplus_orders.toLocaleString("en-IN")
         : "—",
-      emoji: "📦",
+      icon: Package,
       description: "Successfully delivered surplus orders",
+      background: "bg-[#FFF9E9]/90",
     },
   ];
 
-  // Keep each measurement unit separate.
-  const reasonGroups = Object.groupBy(
-    summary?.waste_by_reason ?? [],
-    (item) => item.unit
-  );
+  const reasonGroups = groupByUnit(summary?.waste_by_reason ?? []);
 
-  const flowerGroups = Object.groupBy(wasteByFlower, (item) => item.unit);
+  const flowerGroups = groupByUnit(wasteByFlower);
 
   return (
     <main
-      className="min-h-screen bg-cover bg-center bg-fixed px-4 py-10 text-[#42513e] sm:px-8"
+      className="relative min-h-screen bg-[#FAF7F0] bg-cover bg-center bg-fixed px-5 py-10 text-[#344E41] md:px-12"
       style={{
-        backgroundImage:
-          "linear-gradient(rgba(255,250,239,0.45),rgba(255,250,239,0.65)),url('/images/inventory-background.png')",
+        backgroundImage: "url('/images/inventory-background.png')",
       }}
     >
-      <div className="mx-auto max-w-6xl">
-        {/* Navigation */}
-        <div className="mb-10 flex flex-wrap items-center justify-between gap-4">
-          <Link
-            href="/grow"
-            className="rounded-full border border-[#d8dfcf] bg-white/80 px-5 py-2 text-sm font-medium hover:bg-white"
-          >
-            ← Grower Dashboard
-          </Link>
+      <div className="pointer-events-none absolute inset-0 bg-[#FFF9EF]/15" />
+
+      <div className="relative z-10 mx-auto max-w-6xl">
+        {/* Back navigation */}
+        <Link
+          href="/grow"
+          className="mb-8 inline-flex items-center gap-2 rounded-full bg-white/80 px-4 py-2 text-sm backdrop-blur-sm transition-colors hover:bg-white"
+        >
+          <ArrowLeft size={16} />
+          Back to the Greenhouse
+        </Link>
+
+        {/* Header */}
+        <div className="mb-9 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#718E6D]">
+              BloomBalance · Grower Intelligence
+            </p>
+
+            <h1 className="flex items-center gap-3 font-serif text-4xl md:text-5xl">
+              BloomTrace
+              <Sprout size={34} strokeWidth={1.5} className="text-[#78966F]" />
+            </h1>
+
+            <p className="mt-3 max-w-2xl text-[#73836F]">
+              Every bloom has a story worth saving. Discover what was lost, what
+              found a new home, and where your garden can grow wiser.
+            </p>
+
+            <div className="mt-4 flex items-center gap-2 text-[#91AD83]">
+              <span className="h-px w-10 bg-[#A8BE9B]" />
+              <Leaf size={17} />
+              <span className="h-px w-10 bg-[#A8BE9B]" />
+            </div>
+          </div>
 
           <button
             type="button"
             onClick={() => void loadAnalytics()}
             disabled={loading}
-            className="rounded-full bg-[#536c4b] px-5 py-2 text-sm font-medium text-white transition hover:bg-[#40583a] disabled:opacity-50"
+            className="flex items-center gap-2 rounded-full border border-[#B8C8B2] bg-white/90 px-5 py-3 text-sm shadow-sm backdrop-blur-md transition-colors hover:bg-[#E5EDDF] disabled:opacity-50"
           >
-            {loading ? "Refreshing..." : "↻ Refresh"}
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            Refresh
           </button>
         </div>
 
-        {/* Heading */}
-        <div className="mb-10">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-[#849276]">
-            BloomBalance · Grower Intelligence
-          </p>
-
-          <h1 className="font-serif text-5xl font-semibold tracking-tight text-[#40583a] sm:text-6xl">
-            BloomTrace 🌿
-          </h1>
-
-          <p className="mt-4 max-w-2xl text-lg text-[#74816d]">
-            Every bloom has a story worth saving. Discover what was lost, what
-            found a new home, and where your garden can grow wiser.
-          </p>
-        </div>
-
-        {/* Error */}
+        {/* Error feedback */}
         {error && (
           <div
             role="alert"
-            className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 p-5 text-rose-700"
+            className="mb-6 rounded-xl border border-red-200 bg-red-50/95 p-4 text-red-700"
           >
             {error}
           </div>
         )}
 
-        {/* Summary Cards */}
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {cards.map((card) => (
-            <div
-              key={card.title}
-              className="rounded-[28px] border border-white/90 bg-white/80 p-6 shadow-[0_12px_40px_rgba(80,100,70,0.08)] backdrop-blur-md"
-            >
-              <div className="mb-6 flex items-start justify-between">
-                <span className="text-3xl">{card.emoji}</span>
+        {/* Summary cards */}
+        <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          {cards.map((card) => {
+            const Icon = card.icon;
 
-                <span className="rounded-full bg-[#eef2e7] px-3 py-1 text-[11px] font-medium text-[#698063]">
-                  All time
-                </span>
+            return (
+              <div
+                key={card.title}
+                className={`rounded-2xl border border-white/80 p-6 shadow-md backdrop-blur-md transition-transform duration-300 hover:-translate-y-1 ${card.background}`}
+              >
+                <div className="mb-5 flex items-start justify-between gap-3">
+                  <Icon
+                    size={25}
+                    strokeWidth={1.7}
+                    className="text-[#8DA58A]"
+                  />
+
+                  <span className="rounded-full bg-[#E9F0E5] px-3 py-1 text-[11px] font-medium text-[#60765D]">
+                    All time
+                  </span>
+                </div>
+
+                <p className="text-sm text-[#73836F]">{card.title}</p>
+
+                <h2 className="mt-2 break-words font-serif text-2xl font-semibold">
+                  {loading && !summary ? "Loading..." : card.value}
+                </h2>
+
+                <p className="mt-3 text-xs leading-relaxed text-[#879485]">
+                  {card.description}
+                </p>
               </div>
+            );
+          })}
+        </section>
 
-              <p className="text-sm font-medium text-[#7a8972]">{card.title}</p>
-
-              <h2 className="mt-2 break-words font-serif text-2xl font-semibold text-[#40583a]">
-                {loading && !summary ? "Loading..." : card.value}
-              </h2>
-
-              <p className="mt-3 text-xs leading-relaxed text-[#8a9684]">
-                {card.description}
-              </p>
-            </div>
-          ))}
-        </div>
-
-        {/* Daily Waste Trends */}
+        {/* Daily Waste Trends — existing chart and filters */}
         {organizationId && (
           <BloomTraceWasteChart organizationId={organizationId} />
         )}
 
-        {/* Waste Breakdown Charts */}
+        {/* Detailed analytics */}
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
           {/* Waste by Reason */}
-          <section className="rounded-[30px] border border-white/90 bg-white/85 p-6 shadow-sm sm:p-8">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#8b9a80]">
+          <section className="rounded-2xl border border-white/80 bg-white/90 p-6 shadow-md backdrop-blur-md sm:p-8">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#8DA58A]">
               Understanding Losses
             </p>
 
-            <h2 className="mt-2 font-serif text-3xl text-[#40583a]">
-              Waste by Reason 🍂
-            </h2>
+            <h2 className="mt-2 font-serif text-3xl">Waste by Reason</h2>
 
-            <p className="mt-2 text-sm text-[#7a8972]">
+            <p className="mt-2 text-sm text-[#73836F]">
               Discover why flowers were discarded.
             </p>
 
             {loading && !summary ? (
-              <p className="mt-8 text-sm text-[#849276]">
+              <p className="mt-8 text-sm text-[#73836F]">
                 Loading waste reasons...
               </p>
             ) : !summary?.waste_by_reason.length ? (
-              <div className="mt-8 rounded-2xl bg-[#f5f7ef] p-8 text-center">
-                <span className="text-4xl">🌱</span>
+              <div className="mt-8 rounded-2xl bg-[#F0F5EB] p-8 text-center">
+                <Leaf size={34} className="mx-auto text-[#8DA58A]" />
 
-                <p className="mt-3 text-sm text-[#74816d]">
+                <p className="mt-3 text-sm text-[#73836F]">
                   No waste reasons recorded yet.
                 </p>
               </div>
             ) : (
               <div className="mt-7 space-y-7">
-                {Object.entries(reasonGroups).map(([unit, items]) => {
-                  const rows = items ?? [];
-
+                {Object.entries(reasonGroups).map(([unit, rows]) => {
                   const max = Math.max(1, ...rows.map((item) => item.quantity));
 
                   return (
                     <div key={unit}>
-                      <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-[#849276]">
+                      <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-[#8DA58A]">
                         {unit}
                       </p>
 
@@ -300,18 +334,18 @@ export default function BloomTracePage() {
                         {rows.map((item) => (
                           <div key={`${unit}-${item.reason}`}>
                             <div className="mb-2 flex justify-between gap-3 text-sm">
-                              <span className="text-[#536c4b]">
+                              <span className="text-[#456653]">
                                 {formatReason(item.reason)}
                               </span>
 
-                              <span className="font-medium text-[#40583a]">
+                              <span className="font-medium tabular-nums">
                                 {formatUnit(item.quantity, item.unit)}
                               </span>
                             </div>
 
-                            <div className="h-3 overflow-hidden rounded-full bg-[#edf2e7]">
+                            <div className="h-3 overflow-hidden rounded-full bg-[#EDF2E7]">
                               <div
-                                className="h-full rounded-full bg-[#c69a78] transition-all"
+                                className="h-full rounded-full bg-[#C69A78] transition-all"
                                 style={{
                                   width: `${(item.quantity / max) * 100}%`,
                                 }}
@@ -328,35 +362,33 @@ export default function BloomTracePage() {
           </section>
 
           {/* Most Wasted Flowers */}
-          <section className="rounded-[30px] border border-white/90 bg-white/85 p-6 shadow-sm sm:p-8">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#8b9a80]">
+          <section className="rounded-2xl border border-white/80 bg-white/90 p-6 shadow-md backdrop-blur-md sm:p-8">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#8DA58A]">
               Flower Insights
             </p>
 
-            <h2 className="mt-2 font-serif text-3xl text-[#40583a]">
-              Most Wasted Flowers 🥀
-            </h2>
+            <h2 className="mt-2 font-serif text-3xl">Most Wasted Flowers</h2>
 
-            <p className="mt-2 text-sm text-[#7a8972]">
+            <p className="mt-2 text-sm text-[#73836F]">
               Identify flowers with the highest recorded losses.
             </p>
 
             {loading && !summary ? (
-              <p className="mt-8 text-sm text-[#849276]">
+              <p className="mt-8 text-sm text-[#73836F]">
                 Loading flower insights...
               </p>
             ) : wasteByFlower.length === 0 ? (
-              <div className="mt-8 rounded-2xl bg-[#f5f7ef] p-8 text-center">
-                <span className="text-4xl">🌼</span>
+              <div className="mt-8 rounded-2xl bg-[#F0F5EB] p-8 text-center">
+                <Flower2 size={34} className="mx-auto text-[#8DA58A]" />
 
-                <p className="mt-3 text-sm text-[#74816d]">
+                <p className="mt-3 text-sm text-[#73836F]">
                   No flower losses recorded yet.
                 </p>
               </div>
             ) : (
               <div className="mt-7 space-y-7">
                 {Object.entries(flowerGroups).map(([unit, items]) => {
-                  const rows = [...(items ?? [])].sort(
+                  const rows = [...items].sort(
                     (a, b) => b.total_wasted - a.total_wasted
                   );
 
@@ -367,27 +399,27 @@ export default function BloomTracePage() {
 
                   return (
                     <div key={unit}>
-                      <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-[#849276]">
+                      <p className="mb-4 text-xs font-semibold uppercase tracking-widest text-[#8DA58A]">
                         {unit}
                       </p>
 
                       <div className="space-y-5">
                         {rows.map((flower) => (
-                          <div key={flower.flower_id}>
+                          <div key={`${flower.flower_id}-${flower.variety}`}>
                             <div className="mb-2 flex justify-between gap-3 text-sm">
-                              <span className="text-[#536c4b]">
+                              <span className="text-[#456653]">
                                 {flower.flower_name}
                                 {flower.variety ? ` · ${flower.variety}` : ""}
                               </span>
 
-                              <span className="shrink-0 font-medium text-[#40583a]">
+                              <span className="shrink-0 font-medium tabular-nums">
                                 {formatUnit(flower.total_wasted, flower.unit)}
                               </span>
                             </div>
 
-                            <div className="h-3 overflow-hidden rounded-full bg-[#edf2e7]">
+                            <div className="h-3 overflow-hidden rounded-full bg-[#EDF2E7]">
                               <div
-                                className="h-full rounded-full bg-[#91ad88] transition-all"
+                                className="h-full rounded-full bg-[#91AD88] transition-all"
                                 style={{
                                   width: `${
                                     (flower.total_wasted / max) * 100
@@ -407,11 +439,9 @@ export default function BloomTracePage() {
         </div>
 
         {/* Footer */}
-        <div className="mt-10 text-center">
-          <p className="font-serif text-lg text-[#74816d]">
-            A little more care, a little less waste. 🌷
-          </p>
-        </div>
+        <p className="mt-10 text-center font-serif text-sm italic text-[#73836F]">
+          A little more care, a little less waste.
+        </p>
       </div>
     </main>
   );

@@ -1,8 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { FormEvent } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import axios from "axios";
+import {
+  ArrowLeft,
+  RefreshCw,
+  Search,
+  ShoppingBasket,
+  Package,
+  Flower2,
+  Leaf,
+  Sprout,
+  X,
+  Minus,
+  Plus,
+  Trash2,
+  CheckCircle2,
+  CalendarDays,
+} from "lucide-react";
 import { api } from "@/lib/api";
 import NotificationBell from "@/components/NotificationBell";
 
@@ -41,17 +59,68 @@ type OrderResponse = {
 
 const PAGE_SIZE = 12;
 
-function getDaysUntilExpiry(expiryDate: string) {
-  const today = new Date();
-  const expiry = new Date(`${expiryDate}T00:00:00`);
+const floristId = process.env.NEXT_PUBLIC_FLORIST_ORGANIZATION_ID;
 
-  today.setHours(0, 0, 0, 0);
+// Watercolor artwork stored in public/images/flowers.
+function getFlowerImage(name: string): string | null {
+  const flower = name.toLowerCase();
 
-  return Math.round((expiry.getTime() - today.getTime()) / 86400000);
+  if (flower.includes("rose")) {
+    return "/images/flowers/rose.png";
+  }
+
+  if (flower.includes("lavender")) {
+    return "/images/flowers/lavender.png";
+  }
+
+  return null;
 }
 
-function getFreshness(expiryDate: string) {
-  const days = getDaysUntilExpiry(expiryDate);
+function formatDate(value: string) {
+  const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function daysUntilExpiry(value: string) {
+  const today = new Date();
+
+  const todayUTC = Date.UTC(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  );
+
+  const expiry = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+
+  return Math.round((expiry.getTime() - todayUTC) / 86400000);
+}
+
+function freshnessInfo(expiryDate: string) {
+  const days = daysUntilExpiry(expiryDate);
+
+  if (days < 0) {
+    return {
+      label: "Expired",
+      style: "bg-rose-100 text-rose-800",
+    };
+  }
 
   if (days <= 2) {
     return {
@@ -73,29 +142,15 @@ function getFreshness(expiryDate: string) {
   };
 }
 
-function getFlowerEmoji(name: string) {
-  const value = name.toLowerCase();
-
-  if (value.includes("rose")) return "🌹";
-  if (value.includes("lavender")) return "🪻";
-  if (value.includes("sunflower")) return "🌻";
-  if (value.includes("tulip")) return "🌷";
-  if (value.includes("hibiscus")) return "🌺";
-
-  return "🌸";
-}
-
 function getErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
 
-    if (typeof detail === "string") {
-      return detail;
-    }
+    if (typeof detail === "string") return detail;
 
     if (Array.isArray(detail)) {
       return detail
-        .map((item) => item.msg || "Invalid order details")
+        .map((item: { msg?: string }) => item.msg || "Invalid order details")
         .join(", ");
     }
 
@@ -105,13 +160,49 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Something went wrong.";
 }
 
+function flowerPalette(name: string, color: string | null) {
+  const text = `${name} ${color ?? ""}`.toLowerCase();
+
+  if (text.includes("rose") || text.includes("red")) {
+    return {
+      background: "from-[#F8E6E3] to-[#F6F0E8]",
+      foreground: "text-[#C7797B]",
+    };
+  }
+
+  if (text.includes("lavender") || text.includes("purple")) {
+    return {
+      background: "from-[#EEE8F5] to-[#F4F1E8]",
+      foreground: "text-[#9885BA]",
+    };
+  }
+
+  if (text.includes("sunflower") || text.includes("yellow")) {
+    return {
+      background: "from-[#FAEECF] to-[#F6F2E6]",
+      foreground: "text-[#D1A84E]",
+    };
+  }
+
+  if (text.includes("pink")) {
+    return {
+      background: "from-[#F9E8EF] to-[#F7F1E9]",
+      foreground: "text-[#D59AAE]",
+    };
+  }
+
+  return {
+    background: "from-[#EAF1E4] to-[#F8F4EA]",
+    foreground: "text-[#8DA58A]",
+  };
+}
+
 export default function FloristMarketplacePage() {
   const [flowers, setFlowers] = useState<MarketplaceFlower[]>([]);
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [color, setColor] = useState("");
-
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
 
@@ -157,21 +248,27 @@ export default function FloristMarketplacePage() {
     void loadFlowers();
   }, [loadFlowers]);
 
-  const handleSearch = (event: React.FormEvent) => {
+  function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setOffset(0);
     setSearch(searchInput.trim());
-  };
+  }
 
-  const handleColorChange = (value: string) => {
+  function handleColorChange(value: string) {
     setColor(value);
     setOffset(0);
-  };
+  }
 
-  const addToCart = (flower: MarketplaceFlower) => {
+  function addToCart(flower: MarketplaceFlower) {
     setCartError("");
     setCheckoutError("");
     setCheckoutSuccess("");
+
+    if (daysUntilExpiry(flower.expiry_date) < 0) {
+      setCartError("This flower batch has expired.");
+      setCartOpen(true);
+      return;
+    }
 
     if (
       cart.length > 0 &&
@@ -223,11 +320,11 @@ export default function FloristMarketplacePage() {
     });
 
     setCartOpen(true);
-  };
+  }
 
-  const updateQuantity = (batchId: string, quantity: number) => {
-    setCheckoutError("");
+  function updateQuantity(batchId: string, quantity: number) {
     setCartError("");
+    setCheckoutError("");
 
     setCart((current) =>
       current.map((item) =>
@@ -242,24 +339,24 @@ export default function FloristMarketplacePage() {
           : item
       )
     );
-  };
+  }
 
-  const removeFromCart = (batchId: string) => {
-    setCheckoutError("");
+  function removeFromCart(batchId: string) {
     setCartError("");
+    setCheckoutError("");
 
     setCart((current) =>
       current.filter((item) => item.flower.batch_id !== batchId)
     );
-  };
+  }
 
-  const clearCart = () => {
+  function clearCart() {
     setCart([]);
     setCartError("");
     setCheckoutError("");
-  };
+  }
 
-  const placeOrder = async () => {
+  async function placeOrder() {
     if (cart.length === 0 || checkoutLoading) return;
 
     setCheckoutLoading(true);
@@ -268,15 +365,13 @@ export default function FloristMarketplacePage() {
     setCartError("");
 
     try {
-      const buyerId = process.env.NEXT_PUBLIC_FLORIST_ORGANIZATION_ID;
-
-      if (!buyerId) {
+      if (!floristId) {
         throw new Error("Florist organization is not configured.");
       }
 
       const sellerId = cart[0].flower.grower_organization_id;
 
-      if (buyerId === sellerId) {
+      if (floristId === sellerId) {
         throw new Error("Buyer and seller cannot be the same organization.");
       }
 
@@ -292,8 +387,8 @@ export default function FloristMarketplacePage() {
         throw new Error("Only one batch per flower type is supported.");
       }
 
-      // Recheck marketplace availability before ordering.
-      // This does not reserve inventory.
+      // Availability check only.
+      // Inventory is not reserved at this stage.
       const availability = await api.get<MarketplaceResponse>(
         "/marketplace/flowers",
         {
@@ -320,6 +415,10 @@ export default function FloristMarketplacePage() {
           throw new Error(`${item.flower.name} is no longer available.`);
         }
 
+        if (daysUntilExpiry(currentBatch.expiry_date) < 0) {
+          throw new Error(`${item.flower.name} has expired.`);
+        }
+
         if (currentBatch.available_quantity < item.quantity) {
           throw new Error(
             `Only ${currentBatch.available_quantity} ` +
@@ -327,7 +426,10 @@ export default function FloristMarketplacePage() {
           );
         }
 
-        if (currentBatch.price_per_unit !== item.flower.price_per_unit) {
+        if (
+          Number(currentBatch.price_per_unit) !==
+          Number(item.flower.price_per_unit)
+        ) {
           throw new Error(
             `The price of ${item.flower.name} has changed. ` +
               "Please refresh your basket."
@@ -336,7 +438,7 @@ export default function FloristMarketplacePage() {
       }
 
       const payload = {
-        buyer_organization_id: buyerId,
+        buyer_organization_id: floristId,
         seller_organization_id: sellerId,
         items: cart.map((item) => ({
           flower_id: item.flower.flower_id,
@@ -359,7 +461,7 @@ export default function FloristMarketplacePage() {
     } finally {
       setCheckoutLoading(false);
     }
-  };
+  }
 
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -373,76 +475,89 @@ export default function FloristMarketplacePage() {
 
   return (
     <main
-      className="min-h-screen bg-cover bg-center bg-fixed px-4 py-10 text-[#42513e] sm:px-8"
+      className="relative min-h-screen bg-[#FAF7F0] bg-cover bg-center bg-fixed px-5 py-10 text-[#344E41] md:px-12"
       style={{
-        backgroundImage:
-          "linear-gradient(rgba(255,250,239,0.35),rgba(255,250,239,0.60)),url('/images/inventory-background.png')",
+        backgroundImage: "url('/images/inventory-background.png')",
       }}
     >
-      <div className="mx-auto max-w-6xl">
+      <div className="pointer-events-none absolute inset-0 bg-[#FFF9EF]/15" />
+
+      <div className="relative z-10 mx-auto max-w-6xl">
         {/* Navigation */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link
             href="/"
-            className="text-sm font-medium text-[#687c60] hover:underline"
+            className="inline-flex items-center gap-2 rounded-full bg-white/80 px-4 py-2 text-sm backdrop-blur-sm transition-colors hover:bg-white"
           >
-            ← Back to BloomBalance
+            <ArrowLeft size={16} />
+            Back to BloomBalance
           </Link>
 
           <div className="flex items-center gap-3">
-            {process.env.NEXT_PUBLIC_FLORIST_ORGANIZATION_ID && (
-              <NotificationBell
-                organizationId={process.env.NEXT_PUBLIC_FLORIST_ORGANIZATION_ID}
-              />
-            )}
+            {floristId && <NotificationBell organizationId={floristId} />}
 
             <Link
               href="/florist/orders"
-              className="rounded-full bg-white/80 px-5 py-2 text-sm font-medium text-[#526a4c] hover:bg-white"
+              className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/90 px-5 py-2.5 text-sm shadow-sm transition-colors hover:bg-white"
             >
-              📦 My Orders
+              <Package size={16} />
+              My Orders
             </Link>
           </div>
         </div>
 
-        <header className="mb-10 mt-8 text-center">
-          <p className="mb-3 text-sm tracking-[0.2em] text-[#879a77]">
-            BLOOMBALANCE · FLORIST MARKET
+        {/* Heading */}
+        <header className="mb-10 mt-10 text-center">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-[#718E6D]">
+            BloomBalance · Florist Market
           </p>
 
-          <h1 className="font-serif text-4xl text-[#50664c] sm:text-6xl">
-            The Flower Market
-          </h1>
+          <h1 className="font-serif text-4xl md:text-6xl">The Flower Market</h1>
 
-          <p className="mx-auto mt-4 max-w-xl text-[#73846d]">
+          <p className="mx-auto mt-4 max-w-xl text-[#73836F]">
             A little marketplace full of beautiful blooms, thoughtfully grown
             and freshly gathered.
           </p>
+
+          <div className="mt-5 flex items-center justify-center gap-2 text-[#91AD83]">
+            <span className="h-px w-12 bg-[#A8BE9B]" />
+            <Leaf size={17} />
+            <span className="h-px w-12 bg-[#A8BE9B]" />
+          </div>
         </header>
 
-        {/* Search and filters */}
-        <section className="mb-8 rounded-3xl border border-white/80 bg-white/80 p-5 shadow-sm backdrop-blur-md">
+        {/* Search */}
+        <section className="mb-8 rounded-2xl border border-white/80 bg-white/90 p-5 shadow-md backdrop-blur-md">
           <div className="flex flex-col gap-4 md:flex-row">
-            <form onSubmit={handleSearch} className="flex flex-1 gap-2">
-              <input
-                value={searchInput}
-                onChange={(event) => setSearchInput(event.target.value)}
-                placeholder="Search roses, lavender, tulips..."
-                className="min-w-0 flex-1 rounded-full border border-[#dce5d6] bg-[#fffdf8] px-5 py-3 text-sm outline-none focus:border-[#8fa98b]"
-              />
+            <form onSubmit={handleSearch} className="flex min-w-0 flex-1 gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Search
+                  size={18}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8DA58A]"
+                />
+
+                <input
+                  aria-label="Search flowers"
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                  placeholder="Search roses, lavender, tulips..."
+                  className="w-full rounded-full border border-[#D6E1D1] bg-[#FFFCF7] py-3 pl-11 pr-4 text-sm outline-none focus:border-[#8DA58A]"
+                />
+              </div>
 
               <button
                 type="submit"
-                className="rounded-full bg-[#698567] px-6 py-3 text-sm font-medium text-white hover:bg-[#536e51]"
+                className="rounded-full bg-[#344E41] px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-[#456653]"
               >
                 Search
               </button>
             </form>
 
             <select
+              aria-label="Filter by color"
               value={color}
               onChange={(event) => handleColorChange(event.target.value)}
-              className="rounded-full border border-[#dce5d6] bg-[#fffdf8] px-5 py-3 text-sm text-[#526a4c] outline-none"
+              className="rounded-full border border-[#D6E1D1] bg-[#FFFCF7] px-5 py-3 text-sm outline-none focus:border-[#8DA58A]"
             >
               <option value="">All Colors</option>
               <option value="Red">Red</option>
@@ -457,62 +572,82 @@ export default function FloristMarketplacePage() {
 
         {/* Marketplace summary */}
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm font-medium text-[#647b60]">
-            {total} flower batch
-            {total === 1 ? "" : "es"} available
+          <p className="text-sm font-medium text-[#60765D]">
+            {total} flower {total === 1 ? "batch" : "batches"} available
           </p>
 
           <button
             type="button"
             onClick={() => void loadFlowers()}
-            className="rounded-full border border-[#cad8c5] bg-white/80 px-5 py-2 text-sm text-[#526a4c] hover:bg-white"
+            disabled={loading}
+            className="inline-flex items-center gap-2 rounded-full border border-[#B8C8B2] bg-white/90 px-5 py-2.5 text-sm shadow-sm transition-colors hover:bg-white disabled:opacity-50"
           >
+            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
             Refresh Flowers
           </button>
         </div>
 
         {error && (
-          <div
+          <p
             role="alert"
-            className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700"
+            className="mb-6 rounded-xl border border-red-200 bg-red-50/95 p-4 text-red-700"
           >
             {error}
-          </div>
+          </p>
         )}
 
         {checkoutSuccess && (
           <div
             role="status"
-            className="mb-6 rounded-2xl border border-green-200 bg-green-50 p-5 text-green-800"
+            className="mb-6 rounded-2xl border border-[#B8D5B0] bg-[#F0F8EC]/95 p-5 text-[#456653]"
           >
-            <p className="font-semibold">🌸 Your order has been planted!</p>
+            <div className="flex items-center gap-2 font-medium">
+              <CheckCircle2 size={19} />
+              Your order has been placed!
+            </div>
+
             <p className="mt-2 break-words text-sm">{checkoutSuccess}</p>
+
             <p className="mt-2 text-sm">
               The grower can now review your order.
             </p>
+
+            <Link
+              href="/florist/orders"
+              className="mt-3 inline-block text-sm font-medium underline"
+            >
+              View My Orders
+            </Link>
           </div>
         )}
 
+        {/* Flower cards */}
         {loading ? (
-          <div className="py-20 text-center text-[#73846d]">
+          <div className="rounded-2xl bg-white/85 py-20 text-center text-[#73836F]">
             Gathering fresh blooms from the gardens...
           </div>
         ) : flowers.length === 0 ? (
-          <div className="rounded-3xl border border-white/80 bg-white/80 px-6 py-20 text-center shadow-sm">
-            <div className="mb-4 text-5xl">🌷</div>
+          <div className="rounded-2xl border border-white/80 bg-white/90 px-6 py-16 text-center shadow-md">
+            <Flower2
+              size={42}
+              strokeWidth={1.5}
+              className="mx-auto text-[#8DA58A]"
+            />
 
-            <h2 className="font-serif text-2xl text-[#526a4c]">
-              No flowers found
-            </h2>
+            <h2 className="mt-4 font-serif text-2xl">No flowers found</h2>
 
-            <p className="mt-3 text-[#819078]">
+            <p className="mt-3 text-sm text-[#73836F]">
               Try another flower name or color.
             </p>
           </div>
         ) : (
           <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {flowers.map((flower) => {
-              const freshness = getFreshness(flower.expiry_date);
+              const freshness = freshnessInfo(flower.expiry_date);
+
+              const palette = flowerPalette(flower.name, flower.color);
+
+              const imageSrc = getFlowerImage(flower.name);
 
               const inCart = cart.find(
                 (item) => item.flower.batch_id === flower.batch_id
@@ -529,7 +664,10 @@ export default function FloristMarketplacePage() {
                   item.flower.batch_id !== flower.batch_id
               );
 
+              const expired = daysUntilExpiry(flower.expiry_date) < 0;
+
               const cannotAdd =
+                expired ||
                 differentGrower ||
                 differentBatch ||
                 checkoutLoading ||
@@ -538,68 +676,90 @@ export default function FloristMarketplacePage() {
               return (
                 <article
                   key={flower.batch_id}
-                  className="overflow-hidden rounded-3xl border border-white/80 bg-white/85 shadow-sm backdrop-blur-md transition hover:-translate-y-1 hover:shadow-lg"
+                  className="overflow-hidden rounded-2xl border border-white/80 bg-white/95 shadow-md backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
                 >
-                  <div className="flex h-44 items-center justify-center bg-gradient-to-b from-[#f6eee8] to-[#f1f3e8]">
-                    <span className="text-7xl" aria-hidden="true">
-                      {getFlowerEmoji(flower.name)}
-                    </span>
+                  {/* Watercolor illustration */}
+                  <div
+                    className={`relative flex h-48 items-center justify-center overflow-hidden bg-gradient-to-b ${palette.background}`}
+                  >
+                    <div className="absolute left-5 top-4 flex items-center gap-1 text-xs text-[#718E6D]">
+                      <Sprout size={14} />
+                      Garden grown
+                    </div>
+
+                    {imageSrc ? (
+                      <Image
+                        src={imageSrc}
+                        alt={`${flower.name} watercolor illustration`}
+                        width={210}
+                        height={190}
+                        className="h-44 w-48 object-contain transition-transform duration-300 hover:scale-105"
+                      />
+                    ) : (
+                      <Flower2
+                        size={88}
+                        strokeWidth={1.05}
+                        className={palette.foreground}
+                        aria-hidden="true"
+                      />
+                    )}
                   </div>
 
                   <div className="p-6">
-                    <div className="mb-4 flex items-start justify-between gap-3">
+                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <h2 className="font-serif text-2xl text-[#50664c]">
-                          {flower.name}
-                        </h2>
+                        <h2 className="font-serif text-2xl">{flower.name}</h2>
 
-                        <p className="mt-1 text-sm text-[#819078]">
+                        <p className="mt-1 text-sm text-[#73836F]">
                           {flower.variety}
                           {flower.color ? ` · ${flower.color}` : ""}
                         </p>
                       </div>
 
                       <span
-                        className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${freshness.style}`}
+                        className={`rounded-full px-3 py-1 text-xs font-medium ${freshness.style}`}
                       >
                         {freshness.label}
                       </span>
                     </div>
 
-                    <p className="mb-5 text-sm text-[#819078]">
+                    <p className="mb-5 text-sm text-[#73836F]">
                       Grown with care by{" "}
-                      <span className="font-medium text-[#526a4c]">
+                      <span className="font-medium text-[#456653]">
                         {flower.grower_name}
                       </span>
                     </p>
 
-                    <div className="space-y-3 border-t border-[#e7e9df] pt-4">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-[#819078]">Available</span>
+                    <div className="space-y-3 border-t border-[#E5EDDF] pt-4 text-sm">
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#73836F]">Available</span>
 
-                        <span className="font-semibold text-[#526a4c]">
-                          {flower.available_quantity} {flower.unit}
+                        <span className="font-semibold">
+                          {flower.available_quantity.toLocaleString("en-IN")}{" "}
+                          {flower.unit}
                         </span>
                       </div>
 
-                      <div className="flex justify-between text-sm">
-                        <span className="text-[#819078]">Harvested</span>
-                        <span>{flower.harvest_date}</span>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#73836F]">Harvested</span>
+
+                        <span>{formatDate(flower.harvest_date)}</span>
                       </div>
 
-                      <div className="flex justify-between text-sm">
-                        <span className="text-[#819078]">Best before</span>
-                        <span>{flower.expiry_date}</span>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[#73836F]">Best before</span>
+
+                        <span>{formatDate(flower.expiry_date)}</span>
                       </div>
                     </div>
 
-                    <div className="mt-6 flex items-center justify-between border-t border-[#e7e9df] pt-5">
+                    <div className="mt-6 flex flex-wrap items-end justify-between gap-3 border-t border-[#E5EDDF] pt-5">
                       <div>
-                        <p className="font-serif text-2xl text-[#526a4c]">
-                          {Number(flower.price_per_unit).toFixed(2)}
+                        <p className="font-serif text-2xl">
+                          {formatMoney(Number(flower.price_per_unit))}
                         </p>
 
-                        <p className="text-xs text-[#819078]">
+                        <p className="text-xs text-[#73836F]">
                           per {flower.unit}
                         </p>
                       </div>
@@ -608,9 +768,13 @@ export default function FloristMarketplacePage() {
                         type="button"
                         onClick={() => addToCart(flower)}
                         disabled={cannotAdd}
-                        className="rounded-full bg-[#698567] px-5 py-2 text-sm font-medium text-white transition hover:bg-[#536e51] disabled:cursor-not-allowed disabled:opacity-40"
+                        className="inline-flex items-center gap-2 rounded-full bg-[#344E41] px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-[#456653] disabled:cursor-not-allowed disabled:bg-[#C7D2C5]"
                       >
-                        {inCart
+                        <ShoppingBasket size={16} />
+
+                        {expired
+                          ? "Expired"
+                          : inCart
                           ? `In Basket (${inCart.quantity})`
                           : "Add to Basket"}
                       </button>
@@ -631,14 +795,13 @@ export default function FloristMarketplacePage() {
               onClick={() =>
                 setOffset((current) => Math.max(0, current - PAGE_SIZE))
               }
-              className="rounded-full border border-[#cad8c5] bg-white/85 px-5 py-2 text-sm text-[#526a4c] disabled:opacity-40"
+              className="rounded-full border border-[#B8C8B2] bg-white/90 px-5 py-2.5 text-sm disabled:opacity-40"
             >
               Previous
             </button>
 
-            <span className="text-sm text-[#647b60]">
-              Page {Math.floor(offset / PAGE_SIZE) + 1}
-              {" of "}
+            <span className="text-sm">
+              Page {Math.floor(offset / PAGE_SIZE) + 1} of{" "}
               {Math.ceil(total / PAGE_SIZE)}
             </span>
 
@@ -646,75 +809,82 @@ export default function FloristMarketplacePage() {
               type="button"
               disabled={!hasNext}
               onClick={() => setOffset((current) => current + PAGE_SIZE)}
-              className="rounded-full border border-[#cad8c5] bg-white/85 px-5 py-2 text-sm text-[#526a4c] disabled:opacity-40"
+              className="rounded-full border border-[#B8C8B2] bg-white/90 px-5 py-2.5 text-sm disabled:opacity-40"
             >
               Next
             </button>
           </div>
         )}
+
+        <p className="mt-12 text-center font-serif text-sm italic text-[#73836F]">
+          Fresh from the garden, thoughtfully shared.
+        </p>
       </div>
 
-      {/* Floating basket button */}
+      {/* Floating basket */}
       <button
         type="button"
         onClick={() => setCartOpen(true)}
-        className="fixed bottom-8 right-8 z-40 rounded-full bg-[#698567] px-6 py-4 font-medium text-white shadow-xl transition hover:bg-[#536e51]"
+        className="fixed bottom-6 right-6 z-40 inline-flex items-center gap-3 rounded-full bg-[#344E41] px-6 py-4 font-medium text-white shadow-xl transition-colors hover:bg-[#456653]"
       >
-        🧺 Basket ({cartCount})
+        <ShoppingBasket size={20} />
+        Basket ({cartCount})
       </button>
 
-      {/* Basket panel */}
+      {/* Basket drawer */}
       {cartOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/30">
+        <div className="fixed inset-0 z-50 flex justify-end bg-[#203629]/45">
           <div
             role="dialog"
             aria-modal="true"
             aria-label="Flower Basket"
-            className="flex h-full w-full max-w-md flex-col bg-[#fffdf7] p-6 shadow-2xl"
+            className="flex h-full w-full max-w-md flex-col bg-[#FFFCF6] p-6 shadow-2xl"
           >
-            <div className="flex items-center justify-between border-b border-[#e7e9df] pb-5">
+            <div className="flex items-center justify-between border-b border-[#E5EDDF] pb-5">
               <div>
-                <p className="text-xs tracking-widest text-[#819078]">
-                  YOUR FLOWER SELECTION
+                <p className="text-xs uppercase tracking-widest text-[#8DA58A]">
+                  Your Flower Selection
                 </p>
 
-                <h2 className="mt-1 font-serif text-3xl text-[#50664c]">
-                  Flower Basket 🧺
-                </h2>
+                <h2 className="mt-1 font-serif text-3xl">Flower Basket</h2>
               </div>
 
               <button
                 type="button"
-                onClick={() => setCartOpen(false)}
-                className="text-2xl text-[#819078]"
                 aria-label="Close basket"
+                onClick={() => setCartOpen(false)}
+                className="rounded-full p-2 hover:bg-[#E5EDDF]"
               >
-                ×
+                <X size={21} />
               </button>
             </div>
 
-            <div className="flex-1 space-y-5 overflow-y-auto py-6">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-6">
               {cart.length === 0 ? (
-                <p className="py-12 text-center text-[#819078]">
-                  Your basket is waiting for its first bloom.
-                </p>
+                <div className="py-12 text-center">
+                  <Flower2 size={40} className="mx-auto text-[#8DA58A]" />
+
+                  <p className="mt-4 text-sm text-[#73836F]">
+                    Your basket is waiting for its first bloom.
+                  </p>
+                </div>
               ) : (
                 cart.map((item) => (
                   <div
                     key={item.flower.batch_id}
-                    className="rounded-2xl border border-[#e7e9df] bg-white p-4"
+                    className="rounded-2xl border border-[#E5EDDF] bg-white p-4"
                   >
                     <div className="flex justify-between gap-3">
                       <div>
-                        <h3 className="font-serif text-xl text-[#50664c]">
-                          {getFlowerEmoji(item.flower.name)} {item.flower.name}
+                        <h3 className="font-serif text-xl">
+                          {item.flower.name}
                         </h3>
 
-                        <p className="mt-1 text-sm text-[#819078]">
+                        <p className="mt-1 text-sm text-[#73836F]">
                           {item.flower.variety}
                         </p>
 
-                        <p className="mt-1 text-xs text-[#819078]">
+                        <p className="mt-1 text-xs text-[#73836F]">
                           {item.flower.grower_name}
                         </p>
                       </div>
@@ -723,16 +893,18 @@ export default function FloristMarketplacePage() {
                         type="button"
                         disabled={checkoutLoading}
                         onClick={() => removeFromCart(item.flower.batch_id)}
-                        className="text-sm text-rose-600 disabled:opacity-40"
+                        className="flex h-9 w-9 items-center justify-center rounded-full text-rose-600 hover:bg-rose-50 disabled:opacity-40"
+                        aria-label={`Remove ${item.flower.name}`}
                       >
-                        Remove
+                        <Trash2 size={17} />
                       </button>
                     </div>
 
-                    <div className="mt-4 flex items-center justify-between">
+                    <div className="mt-5 flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
                         <button
                           type="button"
+                          aria-label={`Decrease ${item.flower.name} quantity`}
                           disabled={checkoutLoading || item.quantity <= 1}
                           onClick={() =>
                             updateQuantity(
@@ -740,17 +912,18 @@ export default function FloristMarketplacePage() {
                               item.quantity - 1
                             )
                           }
-                          className="h-8 w-8 rounded-full border border-[#dce5d6] disabled:opacity-40"
+                          className="flex h-9 w-9 items-center justify-center rounded-full border border-[#D6E1D1] disabled:opacity-40"
                         >
-                          −
+                          <Minus size={15} />
                         </button>
 
-                        <span className="min-w-5 text-center">
+                        <span className="min-w-6 text-center tabular-nums">
                           {item.quantity}
                         </span>
 
                         <button
                           type="button"
+                          aria-label={`Increase ${item.flower.name} quantity`}
                           disabled={
                             checkoutLoading ||
                             item.quantity >= item.flower.available_quantity
@@ -761,29 +934,34 @@ export default function FloristMarketplacePage() {
                               item.quantity + 1
                             )
                           }
-                          className="h-8 w-8 rounded-full border border-[#dce5d6] disabled:opacity-40"
+                          className="flex h-9 w-9 items-center justify-center rounded-full border border-[#D6E1D1] disabled:opacity-40"
                         >
-                          +
+                          <Plus size={15} />
                         </button>
                       </div>
 
-                      <p className="font-semibold text-[#526a4c]">
-                        {(
+                      <p className="font-semibold tabular-nums">
+                        {formatMoney(
                           item.quantity * Number(item.flower.price_per_unit)
-                        ).toFixed(2)}
+                        )}
                       </p>
                     </div>
 
-                    <p className="mt-3 text-xs text-[#819078]">
+                    <p className="mt-3 text-xs text-[#73836F]">
                       {item.quantity} {item.flower.unit} ×{" "}
-                      {Number(item.flower.price_per_unit).toFixed(2)}
+                      {formatMoney(Number(item.flower.price_per_unit))}
+                    </p>
+
+                    <p className="mt-2 flex items-center gap-1 text-xs text-[#879485]">
+                      <CalendarDays size={13} />
+                      Best before {formatDate(item.flower.expiry_date)}
                     </p>
                   </div>
                 ))
               )}
             </div>
 
-            <div className="border-t border-[#e7e9df] pt-5">
+            <div className="border-t border-[#E5EDDF] pt-5">
               {cartError && (
                 <p
                   role="alert"
@@ -811,26 +989,26 @@ export default function FloristMarketplacePage() {
                 </p>
               )}
 
-              <div className="mb-5 flex justify-between">
+              <div className="mb-5 flex items-center justify-between">
                 <span className="font-medium">Basket Total</span>
 
-                <span className="font-serif text-2xl text-[#50664c]">
-                  {cartTotal.toFixed(2)}
+                <span className="font-serif text-2xl">
+                  {formatMoney(cartTotal)}
                 </span>
               </div>
 
-              <p className="mb-4 text-xs text-[#819078]">
+              <p className="mb-4 text-xs leading-relaxed text-[#73836F]">
                 Orders are submitted for grower approval. Inventory is reserved
                 only when the grower accepts the order.
               </p>
 
               <button
                 type="button"
-                onClick={placeOrder}
+                onClick={() => void placeOrder()}
                 disabled={cart.length === 0 || checkoutLoading}
-                className="w-full rounded-full bg-[#698567] py-3 font-medium text-white transition hover:bg-[#536e51] disabled:opacity-40"
+                className="w-full rounded-full bg-[#344E41] py-3 font-medium text-white transition-colors hover:bg-[#456653] disabled:opacity-40"
               >
-                {checkoutLoading ? "Placing Order..." : "Place Order 🌸"}
+                {checkoutLoading ? "Placing Order..." : "Place Order"}
               </button>
 
               {cart.length > 0 && (
@@ -838,7 +1016,7 @@ export default function FloristMarketplacePage() {
                   type="button"
                   disabled={checkoutLoading}
                   onClick={clearCart}
-                  className="mt-3 w-full py-2 text-sm text-[#819078] hover:underline disabled:opacity-40"
+                  className="mt-3 w-full py-2 text-sm text-[#73836F] hover:underline disabled:opacity-40"
                 >
                   Clear Basket
                 </button>

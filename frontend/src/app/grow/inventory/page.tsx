@@ -11,7 +11,6 @@ import {
   Clock3,
   RefreshCw,
 } from "lucide-react";
-
 import { api } from "@/lib/api";
 
 type InventoryItem = {
@@ -36,7 +35,7 @@ type InventoryResponse = {
   inventory: InventoryItem[];
 };
 
-const organizationId = process.env.NEXT_PUBLIC_ORGANIZATION_ID;
+const organizationId = process.env.NEXT_PUBLIC_GROWER_ORGANIZATION_ID;
 
 const statStyles = [
   "bg-white/85",
@@ -45,6 +44,34 @@ const statStyles = [
   "bg-[#FFF9E9]/90",
 ];
 
+function formatDate(date: string) {
+  const parts = date.slice(0, 10).split("-");
+
+  if (parts.length !== 3) return date;
+
+  const [year, month, day] = parts.map(Number);
+
+  if (!year || !month || !day) return date;
+
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+function getFreshnessStyle(status: InventoryItem["freshness_status"]) {
+  switch (status) {
+    case "FRESH":
+      return "bg-green-100 text-green-800";
+    case "EXPIRING_SOON":
+      return "bg-amber-100 text-amber-800";
+    case "EXPIRED":
+      return "bg-red-100 text-red-800";
+  }
+}
+
 export default function InventoryPage() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,7 +79,7 @@ export default function InventoryPage() {
 
   const loadInventory = useCallback(async () => {
     if (!organizationId) {
-      setError("NEXT_PUBLIC_ORGANIZATION_ID is not configured.");
+      setError("NEXT_PUBLIC_GROWER_ORGANIZATION_ID is not configured.");
       setLoading(false);
       return;
     }
@@ -91,12 +118,12 @@ export default function InventoryPage() {
 
   const stats = [
     {
-      label: "Available Flowers",
+      label: "Available Quantity",
       value: available,
       icon: Sprout,
     },
     {
-      label: "Reserved Flowers",
+      label: "Reserved Quantity",
       value: reserved,
       icon: Package,
     },
@@ -119,7 +146,6 @@ export default function InventoryPage() {
         backgroundImage: "url('/images/inventory-background.png')",
       }}
     >
-      {/* Soft overlay keeps the data readable */}
       <div className="pointer-events-none absolute inset-0 bg-[#FFF9EF]/15" />
 
       <div className="relative z-10 mx-auto max-w-6xl">
@@ -182,13 +208,12 @@ export default function InventoryPage() {
             >
               <Icon className="mb-4 text-[#8DA58A]" size={25} />
 
-              <p className="text-3xl font-semibold">
-                {loading ? "—" : value.toLocaleString()}
+              <p className="text-3xl font-semibold tabular-nums">
+                {loading ? "—" : value.toLocaleString("en-IN")}
               </p>
 
               <p className="mt-2 text-sm text-[#73836F]">{label}</p>
 
-              {/* Botanical decoration */}
               <Leaf
                 size={48}
                 strokeWidth={1}
@@ -207,10 +232,16 @@ export default function InventoryPage() {
 
           {loading ? (
             <p className="p-8 text-[#73836F]">Gathering your flowers...</p>
+          ) : error ? (
+            <p className="p-8 text-[#73836F]">
+              Inventory could not be displayed.
+            </p>
           ) : items.length === 0 ? (
             <div className="p-12 text-center">
               <Flower2 className="mx-auto mb-4 text-[#8DA58A]" size={38} />
+
               <p className="font-serif text-xl">No flowers in inventory yet</p>
+
               <p className="mt-2 text-sm text-[#73836F]">
                 Received flower batches will appear here.
               </p>
@@ -220,66 +251,79 @@ export default function InventoryPage() {
               <table className="w-full min-w-[800px] text-left text-sm">
                 <thead className="bg-[#F0F5EB]/90 text-[#60765D]">
                   <tr>
-                    <th className="px-6 py-4">Flower</th>
-                    <th className="px-6 py-4">Location</th>
-                    <th className="px-6 py-4">Available</th>
-                    <th className="px-6 py-4">Reserved</th>
-                    <th className="px-6 py-4">Expiry</th>
-                    <th className="px-6 py-4">Freshness</th>
+                    <th scope="col" className="px-6 py-4">
+                      Flower
+                    </th>
+                    <th scope="col" className="px-6 py-4">
+                      Location
+                    </th>
+                    <th scope="col" className="px-6 py-4">
+                      Available
+                    </th>
+                    <th scope="col" className="px-6 py-4">
+                      Reserved
+                    </th>
+                    <th scope="col" className="px-6 py-4">
+                      Expiry
+                    </th>
+                    <th scope="col" className="px-6 py-4">
+                      Freshness
+                    </th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {items.map((item) => {
-                    const statusStyles =
-                      item.freshness_status === "FRESH"
-                        ? "bg-green-100 text-green-800"
-                        : item.freshness_status === "EXPIRING_SOON"
-                        ? "bg-amber-100 text-amber-800"
-                        : "bg-red-100 text-red-800";
+                  {items.map((item) => (
+                    <tr
+                      key={`${item.batch_id}-${item.location_id}`}
+                      className="border-t border-[#EDF0E9] transition-colors hover:bg-[#F6FAF2]"
+                    >
+                      <td className="px-6 py-5">
+                        <div className="flex items-center gap-3">
+                          <Flower2
+                            size={23}
+                            className="shrink-0 text-[#D98F8F]"
+                          />
 
-                    return (
-                      <tr
-                        key={`${item.batch_id}-${item.location_id}`}
-                        className="border-t border-[#EDF0E9] transition-colors hover:bg-[#F6FAF2]"
-                      >
-                        <td className="px-6 py-5">
-                          <div className="flex items-center gap-3">
-                            <Flower2
-                              size={23}
-                              className="shrink-0 text-[#D98F8F]"
-                            />
-                            <div>
-                              <p className="font-semibold">
-                                {item.flower_name}
-                              </p>
-                              <p className="text-xs text-[#879485]">
-                                {item.variety}
-                              </p>
-                            </div>
+                          <div>
+                            <p className="font-semibold">{item.flower_name}</p>
+
+                            <p className="text-xs text-[#879485]">
+                              {item.variety}
+                            </p>
+
+                            <p className="mt-1 text-xs text-[#879485]">
+                              Harvested {formatDate(item.harvest_date)}
+                            </p>
                           </div>
-                        </td>
+                        </div>
+                      </td>
 
-                        <td className="px-6 py-5">{item.location_name}</td>
+                      <td className="px-6 py-5">{item.location_name}</td>
 
-                        <td className="px-6 py-5 font-semibold">
-                          {item.available_quantity}
-                        </td>
+                      <td className="px-6 py-5 font-semibold tabular-nums">
+                        {item.available_quantity.toLocaleString("en-IN")}
+                      </td>
 
-                        <td className="px-6 py-5">{item.reserved_quantity}</td>
+                      <td className="px-6 py-5 tabular-nums">
+                        {item.reserved_quantity.toLocaleString("en-IN")}
+                      </td>
 
-                        <td className="px-6 py-5">{item.expiry_date}</td>
+                      <td className="px-6 py-5 whitespace-nowrap">
+                        {formatDate(item.expiry_date)}
+                      </td>
 
-                        <td className="px-6 py-5">
-                          <span
-                            className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${statusStyles}`}
-                          >
-                            {item.freshness_status.replaceAll("_", " ")}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                      <td className="px-6 py-5">
+                        <span
+                          className={`inline-flex whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${getFreshnessStyle(
+                            item.freshness_status
+                          )}`}
+                        >
+                          {item.freshness_status.replaceAll("_", " ")}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

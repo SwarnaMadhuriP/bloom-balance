@@ -1,8 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import axios from "axios";
+import {
+  ArrowLeft,
+  RefreshCw,
+  Leaf,
+  Flower2,
+  Sprout,
+  Package,
+  PackageCheck,
+  Truck,
+  Check,
+  Clock3,
+  ShoppingBasket,
+  CalendarDays,
+} from "lucide-react";
 import { api } from "@/lib/api";
 import NotificationBell from "@/components/NotificationBell";
 
@@ -29,6 +44,8 @@ type Order = {
   items: OrderItem[];
 };
 
+const floristId = process.env.NEXT_PUBLIC_FLORIST_ORGANIZATION_ID;
+
 const STATUSES = [
   "ALL",
   "PENDING",
@@ -48,12 +65,26 @@ const TRACKING_STEPS = [
   "DELIVERED",
 ];
 
+function getFlowerImage(name: string | null) {
+  const value = name?.toLowerCase() ?? "";
+
+  if (value.includes("rose")) {
+    return "/images/flowers/rose.png";
+  }
+
+  if (value.includes("lavender")) {
+    return "/images/flowers/lavender.png";
+  }
+
+  return null;
+}
+
 function statusStyle(status: string) {
   switch (status) {
     case "DELIVERED":
       return "bg-emerald-100 text-emerald-800";
     case "DISPATCHED":
-      return "bg-blue-100 text-blue-800";
+      return "bg-sky-100 text-sky-800";
     case "PREPARING":
       return "bg-amber-100 text-amber-800";
     case "ACCEPTED":
@@ -70,102 +101,119 @@ function getErrorMessage(error: unknown) {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
 
-    if (typeof detail === "string") {
-      return detail;
-    }
+    if (typeof detail === "string") return detail;
 
     return error.message;
   }
 
-  if (error instanceof Error) {
-    return error.message;
-  }
+  if (error instanceof Error) return error.message;
 
   return "Unable to load your orders.";
 }
 
 function formatMoney(value: string | number) {
-  return `₹${Number(value).toLocaleString("en-IN", {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })}`;
+  }).format(Number(value));
 }
 
 function formatDate(value: string) {
-  return new Date(value).toLocaleString("en-IN", {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-IN", {
     dateStyle: "medium",
     timeStyle: "short",
-  });
-}
-
-function getFlowerEmoji(name: string | null) {
-  const flower = name?.toLowerCase() ?? "";
-
-  if (flower.includes("rose")) return "🌹";
-  if (flower.includes("tulip")) return "🌷";
-  if (flower.includes("sunflower")) return "🌻";
-  if (flower.includes("lavender")) return "🪻";
-  if (flower.includes("hibiscus")) return "🌺";
-  if (flower.includes("cherry")) return "🌸";
-
-  return "💐";
+  }).format(date);
 }
 
 function OrderTimeline({ status }: { status: string }) {
   if (status === "CANCELLED" || status === "REJECTED") {
     return (
-      <div className="rounded-xl border border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">
-        This order was {status.toLowerCase()}.
+      <div className="flex items-start gap-3 rounded-xl border border-rose-100 bg-rose-50 p-4 text-sm text-rose-700">
+        <Package size={18} className="mt-0.5 shrink-0" />
+        <span>This order was {status.toLowerCase()}.</span>
       </div>
     );
   }
 
   const currentIndex = TRACKING_STEPS.indexOf(status);
 
+  const descriptions: Record<string, string> = {
+    PENDING: "Waiting for grower confirmation.",
+    ACCEPTED: "The grower accepted your order.",
+    PREPARING: "Your flowers are being prepared.",
+    DISPATCHED: "Your flowers are on their way!",
+    DELIVERED: "Your blooms have arrived!",
+  };
+
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
-        <p className="text-sm font-semibold text-[#526a4c]">Order Journey</p>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-[#456653]">Order Journey</p>
 
-        <p className="text-xs text-[#819078]">
-          {status === "DELIVERED"
-            ? "Your blooms have arrived!"
-            : status === "DISPATCHED"
-            ? "Your flowers are on their way!"
-            : status === "PREPARING"
-            ? "Your flowers are being prepared."
-            : status === "ACCEPTED"
-            ? "The grower accepted your order."
-            : "Waiting for grower confirmation."}
+        <p className="text-xs text-[#73836F]">
+          {descriptions[status] ?? "Order status unavailable."}
         </p>
       </div>
 
-      <div className="grid grid-cols-5 gap-1 sm:gap-2">
+      <div className="grid grid-cols-5 gap-1 sm:gap-3">
         {TRACKING_STEPS.map((step, index) => {
-          const completed = index <= currentIndex;
+          const completed = index < currentIndex;
           const current = index === currentIndex;
+          const reached = index <= currentIndex;
 
           return (
-            <div key={step} className="text-center">
+            <div key={step} className="min-w-0 text-center">
               <div
-                className={`mb-2 h-2 rounded-full transition-all ${
-                  completed ? "bg-[#799777]" : "bg-[#e3e8de]"
+                className={`mx-auto flex h-9 w-9 items-center justify-center rounded-full border transition-colors sm:h-11 sm:w-11 ${
+                  reached
+                    ? "border-[#799777] bg-[#799777] text-white"
+                    : "border-[#D8E3D3] bg-white text-[#A8B6A2]"
+                }`}
+              >
+                {completed ? (
+                  <Check size={18} />
+                ) : index === 0 ? (
+                  <Clock3 size={18} />
+                ) : index === 1 ? (
+                  <Sprout size={18} />
+                ) : index === 2 ? (
+                  <Package size={18} />
+                ) : index === 3 ? (
+                  <Truck size={18} />
+                ) : (
+                  <PackageCheck size={18} />
+                )}
+              </div>
+
+              <div
+                className={`mx-auto my-3 h-1.5 rounded-full ${
+                  reached ? "bg-[#799777]" : "bg-[#E2E9DC]"
                 }`}
               />
 
               <p
-                className={`text-[9px] sm:text-xs ${
+                className={`break-words text-[9px] sm:text-xs ${
                   current
-                    ? "font-bold text-[#526a4c]"
+                    ? "font-bold text-[#344E41]"
                     : completed
-                    ? "font-medium text-[#728a6d]"
-                    : "text-[#a0ab99]"
+                    ? "font-medium text-[#607A5C]"
+                    : "text-[#9CAA97]"
                 }`}
               >
-                {step}
+                {step.charAt(0) + step.slice(1).toLowerCase()}
               </p>
 
-              {current && <span className="mt-1 inline-block text-xs">🌿</span>}
+              {current && (
+                <p className="mt-1 text-[10px] font-medium text-[#799777]">
+                  Current
+                </p>
+              )}
             </div>
           );
         })}
@@ -180,13 +228,16 @@ export default function FloristOrdersPage() {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("ALL");
 
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(
+    null
+  );
+  const [cancelError, setCancelError] = useState("");
+
   const loadOrders = useCallback(async () => {
     setLoading(true);
     setError("");
 
     try {
-      const floristId = process.env.NEXT_PUBLIC_FLORIST_ORGANIZATION_ID;
-
       if (!floristId) {
         throw new Error("Florist organization is not configured.");
       }
@@ -205,14 +256,13 @@ export default function FloristOrdersPage() {
     }
   }, []);
 
-  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(
-    null
-  );
-  const [cancelError, setCancelError] = useState("");
+  useEffect(() => {
+    void loadOrders();
+  }, [loadOrders]);
 
-  const cancelOrder = async (orderId: string) => {
+  async function cancelOrder(orderId: string) {
     const confirmed = window.confirm(
-      "Are you sure you want to cancel this flower order? 🌸"
+      "Are you sure you want to cancel this flower order?"
     );
 
     if (!confirmed) return;
@@ -222,18 +272,13 @@ export default function FloristOrdersPage() {
 
     try {
       await api.post(`/orders/${orderId}/cancel`);
-
       await loadOrders();
     } catch (err) {
       setCancelError(getErrorMessage(err));
     } finally {
       setCancellingOrderId(null);
     }
-  };
-
-  useEffect(() => {
-    void loadOrders();
-  }, [loadOrders]);
+  }
 
   const filteredOrders =
     filter === "ALL"
@@ -250,115 +295,122 @@ export default function FloristOrdersPage() {
 
   return (
     <main
-      className="min-h-screen bg-cover bg-center bg-fixed px-4 py-10 text-[#42513e] sm:px-8"
+      className="relative min-h-screen bg-[#FAF7F0] bg-cover bg-center bg-fixed px-5 py-10 text-[#344E41] md:px-12"
       style={{
-        backgroundImage:
-          "linear-gradient(rgba(255,250,239,0.35),rgba(255,250,239,0.60)),url('/images/inventory-background.png')",
+        backgroundImage: "url('/images/inventory-background.png')",
       }}
     >
-      <div className="mx-auto max-w-6xl">
-        {/* Navigation */}
+      <div className="pointer-events-none absolute inset-0 bg-[#FFF9EF]/15" />
 
+      <div className="relative z-10 mx-auto max-w-6xl">
         {/* Navigation */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link
             href="/florist/marketplace"
-            className="text-sm font-medium text-[#687c60] hover:underline"
+            className="inline-flex items-center gap-2 rounded-full bg-white/80 px-4 py-2 text-sm backdrop-blur-sm transition-colors hover:bg-white"
           >
-            ← Back to Flower Market
+            <ArrowLeft size={16} />
+            Back to Flower Market
           </Link>
 
           <div className="flex items-center gap-3">
-            {process.env.NEXT_PUBLIC_FLORIST_ORGANIZATION_ID && (
-              <NotificationBell
-                organizationId={process.env.NEXT_PUBLIC_FLORIST_ORGANIZATION_ID}
-              />
-            )}
+            {floristId && <NotificationBell organizationId={floristId} />}
 
             <button
               type="button"
               onClick={() => void loadOrders()}
               disabled={loading}
-              className="rounded-full border border-[#cad8c5] bg-white/80 px-5 py-2 text-sm font-medium text-[#526a4c] transition hover:bg-white disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-full border border-[#B8C8B2] bg-white/90 px-5 py-2.5 text-sm shadow-sm transition-colors hover:bg-white disabled:opacity-50"
             >
-              {loading ? "Refreshing..." : "↻ Refresh Orders"}
+              <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+              {loading ? "Refreshing..." : "Refresh Orders"}
             </button>
           </div>
         </div>
 
-        {/* Page Header */}
-        <header className="my-10 text-center">
-          <p className="mb-3 text-sm tracking-[0.2em] text-[#879a77]">
-            BLOOMBALANCE · FLORIST
+        {/* Heading */}
+        <header className="mb-10 mt-10 text-center">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.25em] text-[#718E6D]">
+            BloomBalance · Florist
           </p>
 
-          <h1 className="font-serif text-4xl text-[#50664c] sm:text-6xl">
-            My Flower Orders
-          </h1>
+          <h1 className="font-serif text-4xl md:text-6xl">My Flower Orders</h1>
 
-          <p className="mx-auto mt-4 max-w-xl text-[#73846d]">
-            Every bloom has a journey. Follow yours from the grower's garden to
-            your doorstep.
+          <p className="mx-auto mt-4 max-w-xl text-[#73836F]">
+            Every bloom has a journey. Follow yours from the grower&apos;s
+            garden to your doorstep.
           </p>
+
+          <div className="mt-5 flex items-center justify-center gap-2 text-[#91AD83]">
+            <span className="h-px w-12 bg-[#A8BE9B]" />
+            <Leaf size={17} />
+            <span className="h-px w-12 bg-[#A8BE9B]" />
+          </div>
         </header>
 
-        {/* Summary Cards */}
+        {/* Summary */}
         <section className="mb-8 grid gap-4 sm:grid-cols-3">
           {[
             {
               label: "Total Orders",
               value: orders.length,
-              emoji: "💐",
+              icon: ShoppingBasket,
             },
             {
               label: "Active Orders",
               value: activeOrders,
-              emoji: "🌱",
+              icon: Sprout,
             },
             {
               label: "Delivered",
               value: deliveredOrders,
-              emoji: "🌸",
+              icon: PackageCheck,
             },
-          ].map((item) => (
-            <div
-              key={item.label}
-              className="rounded-3xl border border-white/80 bg-white/80 p-6 text-center shadow-sm backdrop-blur-md"
-            >
-              <div className="mb-2 text-2xl">{item.emoji}</div>
+          ].map((item) => {
+            const Icon = item.icon;
 
-              <p className="text-sm text-[#819078]">{item.label}</p>
+            return (
+              <div
+                key={item.label}
+                className="rounded-2xl border border-white/80 bg-white/90 p-6 text-center shadow-md backdrop-blur-md"
+              >
+                <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[#EDF3E8] text-[#799777]">
+                  <Icon size={22} strokeWidth={1.6} />
+                </div>
 
-              <p className="mt-2 font-serif text-4xl text-[#50664c]">
-                {item.value}
-              </p>
-            </div>
-          ))}
+                <p className="text-sm text-[#73836F]">{item.label}</p>
+
+                <p className="mt-2 font-serif text-4xl">{item.value}</p>
+              </div>
+            );
+          })}
         </section>
 
-        {/* Status Filters */}
+        {/* Filters */}
         <div className="mb-8 flex flex-wrap gap-2">
           {STATUSES.map((status) => (
             <button
               key={status}
               type="button"
               onClick={() => setFilter(status)}
-              className={`rounded-full px-4 py-2 text-xs font-medium transition ${
+              aria-pressed={filter === status}
+              className={`rounded-full px-4 py-2 text-xs font-medium transition-colors ${
                 filter === status
-                  ? "bg-[#698567] text-white shadow-sm"
-                  : "border border-white/80 bg-white/80 text-[#647b60] hover:bg-white"
+                  ? "bg-[#344E41] text-white shadow-sm"
+                  : "border border-white/80 bg-white/90 text-[#60765D] hover:bg-white"
               }`}
             >
-              {status}
+              {status === "ALL"
+                ? "All"
+                : status.charAt(0) + status.slice(1).toLowerCase()}
             </button>
           ))}
         </div>
 
-        {/* Error */}
         {error && (
           <div
             role="alert"
-            className="mb-6 rounded-2xl border border-red-100 bg-red-50 p-4 text-red-700"
+            className="mb-6 rounded-2xl border border-red-200 bg-red-50/95 p-4 text-sm text-red-700"
           >
             {error}
           </div>
@@ -367,26 +419,28 @@ export default function FloristOrdersPage() {
         {cancelError && (
           <div
             role="alert"
-            className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"
+            className="mb-6 rounded-2xl border border-rose-200 bg-rose-50/95 p-4 text-sm text-rose-700"
           >
             {cancelError}
           </div>
         )}
 
-        {/* Loading / Empty / Orders */}
+        {/* Orders */}
         {loading ? (
-          <div className="py-20 text-center text-[#73846d]">
-            🌸 Gathering your flower orders...
+          <div className="rounded-2xl bg-white/85 py-20 text-center text-[#73836F]">
+            Gathering your flower orders...
           </div>
         ) : error ? null : filteredOrders.length === 0 ? (
-          <div className="rounded-3xl border border-white/80 bg-white/85 px-6 py-20 text-center shadow-sm">
-            <div className="mb-4 text-5xl">🪻</div>
+          <div className="rounded-2xl border border-white/80 bg-white/90 px-6 py-16 text-center shadow-md">
+            <Flower2
+              size={42}
+              strokeWidth={1.5}
+              className="mx-auto text-[#8DA58A]"
+            />
 
-            <h2 className="font-serif text-2xl text-[#526a4c]">
-              No orders found
-            </h2>
+            <h2 className="mt-4 font-serif text-2xl">No orders found</h2>
 
-            <p className="mt-3 text-[#819078]">
+            <p className="mt-3 text-sm text-[#73836F]">
               {filter === "ALL"
                 ? "Your next beautiful bloom is waiting in the market."
                 : `You don't have any ${filter.toLowerCase()} orders yet.`}
@@ -394,7 +448,7 @@ export default function FloristOrdersPage() {
 
             <Link
               href="/florist/marketplace"
-              className="mt-6 inline-block rounded-full bg-[#698567] px-6 py-3 text-sm font-medium text-white transition hover:bg-[#587455]"
+              className="mt-6 inline-flex rounded-full bg-[#344E41] px-6 py-3 text-sm font-medium text-white hover:bg-[#456653]"
             >
               Explore Flower Market
             </Link>
@@ -404,27 +458,29 @@ export default function FloristOrdersPage() {
             {filteredOrders.map((order) => (
               <article
                 key={order.id}
-                className="rounded-3xl border border-white/80 bg-white/85 p-6 shadow-sm backdrop-blur-md sm:p-8"
+                className="rounded-2xl border border-white/80 bg-white/95 p-5 shadow-md backdrop-blur-md sm:p-8"
               >
-                {/* Order Header */}
+                {/* Order header */}
                 <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <p className="text-xs tracking-widest text-[#819078]">
-                      FLOWER ORDER
+                    <p className="text-xs uppercase tracking-[0.18em] text-[#879485]">
+                      Flower Order
                     </p>
 
-                    <h2 className="mt-1 font-serif text-xl text-[#50664c] sm:text-2xl">
+                    <h2 className="mt-2 font-serif text-2xl">
                       Order #{order.id.slice(0, 8)}
                     </h2>
 
-                    <p className="mt-2 text-sm text-[#647b60]">
-                      🌿 From{" "}
+                    <p className="mt-2 flex items-center gap-2 text-sm text-[#60765D]">
+                      <Sprout size={15} />
+                      From{" "}
                       <span className="font-semibold">
                         {order.seller_name ?? "Unknown Grower"}
                       </span>
                     </p>
 
-                    <p className="mt-2 text-xs text-[#819078]">
+                    <p className="mt-2 flex items-center gap-2 text-xs text-[#879485]">
+                      <CalendarDays size={13} />
                       Placed on {formatDate(order.created_at)}
                     </p>
                   </div>
@@ -438,79 +494,94 @@ export default function FloristOrdersPage() {
                   </span>
                 </div>
 
-                {/* Order Tracking */}
-                <div className="rounded-2xl border border-[#e8eddf] bg-[#f8faf3]/80 p-4 sm:p-6">
+                {/* Order journey */}
+                <div className="rounded-2xl border border-[#E5EDDF] bg-[#F8FAF3]/90 p-4 sm:p-6">
                   <OrderTimeline status={order.status} />
                 </div>
 
-                {/* Flower Items */}
-                <div className="mt-6 border-t border-[#e7e9df] pt-5">
-                  <p className="mb-4 text-sm font-semibold text-[#526a4c]">
+                {/* Flower items */}
+                <div className="mt-6 border-t border-[#E5EDDF] pt-5">
+                  <h3 className="mb-4 text-sm font-semibold">
                     Flowers in this order
-                  </p>
+                  </h3>
 
-                  <div className="space-y-4">
-                    {order.items.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between gap-4 rounded-2xl bg-[#f9faf5]/80 p-4"
-                      >
-                        <div className="flex min-w-0 items-center gap-4">
-                          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#edf2e6] text-3xl">
-                            {getFlowerEmoji(item.flower_name)}
+                  <div className="space-y-3">
+                    {order.items.map((item) => {
+                      const imageSrc = getFlowerImage(item.flower_name);
+
+                      return (
+                        <div
+                          key={item.id}
+                          className="flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-[#F9FAF5] p-4"
+                        >
+                          <div className="flex min-w-0 items-center gap-4">
+                            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#F0F1E8]">
+                              {imageSrc ? (
+                                <Image
+                                  src={imageSrc}
+                                  alt={
+                                    item.flower_name ?? "Flower illustration"
+                                  }
+                                  width={64}
+                                  height={64}
+                                  className="h-14 w-14 object-contain"
+                                />
+                              ) : (
+                                <Flower2
+                                  size={30}
+                                  strokeWidth={1.4}
+                                  className="text-[#8DA58A]"
+                                />
+                              )}
+                            </div>
+
+                            <div className="min-w-0">
+                              <p className="font-serif text-lg">
+                                {item.flower_name ??
+                                  `Flower #${item.flower_id.slice(0, 8)}`}
+                              </p>
+
+                              <p className="mt-1 text-xs text-[#73836F]">
+                                {[item.flower_variety, item.flower_color]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </p>
+
+                              <p className="mt-2 text-xs text-[#73836F]">
+                                {item.quantity} {item.flower_unit ?? "units"} ×{" "}
+                                {formatMoney(item.unit_price)}
+                              </p>
+                            </div>
                           </div>
 
-                          <div className="min-w-0">
-                            <p className="font-serif text-lg font-medium text-[#526a4c]">
-                              {item.flower_name ??
-                                `Flower #${item.flower_id.slice(0, 8)}`}
-                            </p>
-
-                            <p className="mt-1 text-xs text-[#819078]">
-                              {[item.flower_variety, item.flower_color]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </p>
-
-                            <p className="mt-2 text-xs text-[#819078]">
-                              Quantity: {item.quantity}{" "}
-                              {item.flower_unit ?? "units"}
-                            </p>
-
-                            <p className="mt-1 text-xs text-[#819078]">
-                              {formatMoney(item.unit_price)} per{" "}
-                              {item.flower_unit ?? "unit"}
-                            </p>
-                          </div>
+                          <p className="font-semibold tabular-nums">
+                            {formatMoney(
+                              item.quantity * Number(item.unit_price)
+                            )}
+                          </p>
                         </div>
-
-                        <p className="shrink-0 font-semibold text-[#526a4c]">
-                          {formatMoney(item.quantity * Number(item.unit_price))}
-                        </p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
                 {/* Total */}
-                <div className="mt-6 flex items-center justify-between border-t border-[#e7e9df] pt-5">
-                  <span className="font-medium text-[#526a4c]">
-                    Order Total
-                  </span>
+                <div className="mt-6 flex items-center justify-between border-t border-[#E5EDDF] pt-5">
+                  <span className="font-medium">Order Total</span>
 
-                  <span className="font-serif text-2xl text-[#50664c]">
+                  <span className="font-serif text-2xl">
                     {formatMoney(order.total_amount)}
                   </span>
                 </div>
 
-                {/* Order Actions */}
+                {/* Cancellation */}
                 {["PENDING", "ACCEPTED"].includes(order.status) && (
-                  <div className="mt-6 flex justify-end border-t border-[#e7e9df] pt-5">
+                  <div className="mt-6 flex justify-end border-t border-[#E5EDDF] pt-5">
                     <button
                       type="button"
                       onClick={() => void cancelOrder(order.id)}
                       disabled={cancellingOrderId !== null}
-                      className="rounded-full border border-rose-200 bg-rose-50 px-5 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-full border border-rose-200 bg-rose-50 px-5 py-2.5 text-sm font-medium text-rose-700 transition-colors hover:bg-rose-100 disabled:opacity-50"
                     >
                       {cancellingOrderId === order.id
                         ? "Cancelling..."
@@ -519,25 +590,27 @@ export default function FloristOrdersPage() {
                   </div>
                 )}
 
-                {/* Footer */}
-                <div className="mt-5 border-t border-[#e7e9df] pt-4">
-                  <p className="break-all text-xs text-[#9aa694]">
-                    Order ID: {order.id}
-                  </p>
-                </div>
+                <p className="mt-5 break-all border-t border-[#E5EDDF] pt-4 text-xs text-[#9CAA97]">
+                  Order ID: {order.id}
+                </p>
               </article>
             ))}
           </section>
         )}
 
-        {/* Bottom Navigation */}
+        {/* Footer */}
         <div className="mt-12 text-center">
           <Link
             href="/florist/marketplace"
-            className="inline-block rounded-full border border-[#cad8c5] bg-white/80 px-7 py-3 text-sm font-medium text-[#526a4c] transition hover:bg-white"
+            className="inline-flex items-center gap-2 rounded-full border border-[#B8C8B2] bg-white/90 px-7 py-3 text-sm font-medium transition-colors hover:bg-white"
           >
-            🌸 Continue Exploring Flowers
+            <Flower2 size={17} />
+            Continue Exploring Flowers
           </Link>
+
+          <p className="mt-6 font-serif text-sm italic text-[#73836F]">
+            Every flower has a journey. Every bloom has a story.
+          </p>
         </div>
       </div>
     </main>

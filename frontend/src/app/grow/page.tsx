@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 
+// Clickable wooden signboards
 const greenhouseAreas = [
   {
     name: "My Flowers",
@@ -28,6 +29,7 @@ const greenhouseAreas = [
   },
 ];
 
+// Navigation labels embedded in the illustration
 const navigationAreas = [
   {
     name: "BloomBalance Home",
@@ -61,36 +63,53 @@ const navigationAreas = [
   },
 ];
 
+const secondaryLinks = [
+  {
+    name: "Pending Harvests",
+    href: "/grow/pending-harvests",
+  },
+  {
+    name: "BloomTrace Analytics",
+    href: "/grow/bloomtrace",
+  },
+];
+
 export default function GrowPage() {
   return (
     <main className="min-h-screen bg-[#FFF9EE]">
       <div className="relative w-full">
+        {/* Greenhouse illustration */}
         <Image
           src="/images/grow-greenhouse.png"
-          alt="A whimsical flower greenhouse with illustrated navigation signs for My Flowers, Inventory, and Orders"
+          alt="The Grower's Greenhouse, featuring flowers, inventory crates, and an orders desk"
           width={1648}
           height={928}
           priority
           className="h-auto w-full"
         />
 
-        {/* Navigation hotspots over image-embedded labels */}
+        {/* Top navigation hotspots */}
         {navigationAreas.map((area) => (
           <Link
             key={area.name}
             href={area.href}
             aria-label={area.name}
             title={area.name}
-            className="absolute z-20 h-[7%] rounded-md focus-visible:outline-4 focus-visible:outline-[#344E41]"
+            className="
+              absolute top-[1%] z-20 h-[7%]
+              cursor-pointer rounded-md
+              focus-visible:outline-2
+              focus-visible:outline-offset-2
+              focus-visible:outline-[#344E41]
+            "
             style={{
               left: area.left,
-              top: "1%",
               width: area.width,
             }}
           />
         ))}
 
-        {/* Greenhouse wooden signboards */}
+        {/* Interactive wooden signboards */}
         {greenhouseAreas.map((area) => (
           <Link
             key={area.name}
@@ -98,11 +117,12 @@ export default function GrowPage() {
             aria-label={`Explore ${area.name}`}
             title={`Explore ${area.name}`}
             className="
-              absolute z-10 cursor-pointer rounded-xl
+              absolute z-10 cursor-pointer
+              rounded-xl
               transition-colors duration-300
-              hover:bg-white/10
-              focus-visible:bg-white/15
-              focus-visible:outline-4
+              hover:bg-white/15
+              focus-visible:bg-white/20
+              focus-visible:outline-2
               focus-visible:outline-[#344E41]
             "
             style={{
@@ -114,48 +134,42 @@ export default function GrowPage() {
           />
         ))}
 
-        {/* Secondary greenhouse navigation */}
-        <div
+        {/* Secondary navigation */}
+        <nav
+          aria-label="More grower tools"
           className="
-            absolute bottom-[7%] right-[4%] z-20
-            flex flex-col items-end gap-2
-            sm:flex-row sm:items-center sm:gap-3
+            absolute bottom-[6%] right-[4%] z-30
+            flex flex-wrap justify-end gap-3
           "
         >
-          <Link
-            href="/grow/pending-harvests"
-            className="
-              rounded-full border border-[#C7D5B8]
-              bg-[#FFF9EE]/95 px-4 py-2
-              font-serif text-xs font-semibold text-[#476B48]
-              shadow-md backdrop-blur-sm
-              transition-all duration-300
-              hover:-translate-y-1 hover:bg-white hover:shadow-lg
-              focus-visible:outline-4
-              focus-visible:outline-[#344E41]
-              sm:px-5 sm:py-3 sm:text-sm
-            "
-          >
-            🌱 Pending Harvests →
-          </Link>
-
-          <Link
-            href="/grow/bloomtrace"
-            className="
-              rounded-full border border-[#C7D5B8]
-              bg-[#FFF9EE]/95 px-4 py-2
-              font-serif text-xs font-semibold text-[#476B48]
-              shadow-md backdrop-blur-sm
-              transition-all duration-300
-              hover:-translate-y-1 hover:bg-white hover:shadow-lg
-              focus-visible:outline-4
-              focus-visible:outline-[#344E41]
-              sm:px-5 sm:py-3 sm:text-sm
-            "
-          >
-            🌿 BloomTrace Analytics →
-          </Link>
-        </div>
+          {secondaryLinks.map((link) => (
+            <Link
+              key={link.name}
+              href={link.href}
+              className="
+                rounded-full
+                border border-[#C7D5B8]
+                bg-[#FFF9EE]/95
+                px-4 py-2
+                font-serif text-xs font-semibold
+                text-[#476B48]
+                shadow-md
+                backdrop-blur-sm
+                transition-all duration-300
+                hover:-translate-y-1
+                hover:border-[#78916B]
+                hover:bg-white
+                hover:shadow-lg
+                focus-visible:outline-2
+                focus-visible:outline-offset-2
+                focus-visible:outline-[#344E41]
+                sm:px-5 sm:py-2.5 sm:text-sm
+              "
+            >
+              {link.name} <span aria-hidden="true">→</span>
+            </Link>
+          ))}
+        </nav>
       </div>
     </main>
   );
