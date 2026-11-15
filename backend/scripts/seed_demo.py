@@ -3,8 +3,6 @@ from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid5, NAMESPACE_DNS
 
-from sqlalchemy import select
-
 from app.database import SessionLocal
 from app.models.organization import Organization
 from app.models.flower import Flower
@@ -36,28 +34,37 @@ def seed():
     today = date.today()
 
     with SessionLocal.begin() as db:
-        for org_id, name, org_type in [
+        organizations = [
             (GROWER_ID, "Rosewood Flower Farm", "grower"),
             (FLORIST_ID, "Bloom Florist", "florist"),
-        ]:
+        ]
+
+        for org_id, name, org_type in organizations:
             if db.get(Organization, org_id) is None:
-                db.add(Organization(
-                    id=org_id,
-                    name=name,
-                    organization_type=org_type,
-                ))
+                db.add(
+                    Organization(
+                        id=org_id,
+                        name=name,
+                        organization_type=org_type,
+                    )
+                )
+
+        db.flush()
 
         location_id = uuid5(
-            NAMESPACE_DNS, "bloombalance-demo-grower-storage"
+            NAMESPACE_DNS,
+            "bloombalance-demo-grower-storage",
         )
 
         if db.get(InventoryLocation, location_id) is None:
-            db.add(InventoryLocation(
-                id=location_id,
-                organization_id=GROWER_ID,
-                name="Main Cold Storage",
-                location_type="cold_storage",
-            ))
+            db.add(
+                InventoryLocation(
+                    id=location_id,
+                    organization_id=GROWER_ID,
+                    name="Main Cold Storage",
+                    location_type="cold_storage",
+                )
+            )
 
         db.flush()
 
@@ -65,53 +72,64 @@ def seed():
             flower_uuid = UUID(flower_id)
 
             if db.get(Flower, flower_uuid) is None:
-                db.add(Flower(
-                    id=flower_uuid,
-                    name=name,
-                    variety=variety,
-                    color=color,
-                    unit="stem",
-                ))
+                db.add(
+                    Flower(
+                        id=flower_uuid,
+                        name=name,
+                        variety=variety,
+                        color=color,
+                        unit="stem",
+                    )
+                )
 
-            db.flush()
+        db.flush()
 
-            # Stable batch ID prevents duplicate demo batches.
+        for flower_id, name, variety, color, quantity, price in FLOWERS:
+            flower_uuid = UUID(flower_id)
+
             batch_id = uuid5(
                 NAMESPACE_DNS,
                 f"bloombalance-demo-{flower_id}",
             )
 
-            batch = db.get(FlowerBatch, batch_id)
-
-            if batch is None:
-                batch = FlowerBatch(
-                    id=batch_id,
-                    flower_id=flower_uuid,
-                    grower_organization_id=GROWER_ID,
-                    harvest_date=today,
-                    expiry_date=today + timedelta(days=30),
-                    initial_quantity=quantity,
-                    price_per_unit=Decimal(price),
+            if db.get(FlowerBatch, batch_id) is None:
+                db.add(
+                    FlowerBatch(
+                        id=batch_id,
+                        flower_id=flower_uuid,
+                        grower_organization_id=GROWER_ID,
+                        harvest_date=today,
+                        expiry_date=today + timedelta(days=30),
+                        initial_quantity=quantity,
+                        price_per_unit=Decimal(price),
+                    )
                 )
-                db.add(batch)
-                db.flush()
 
-            balance = db.get(
-                InventoryBalance,
-                (batch_id, location_id),
+        db.flush()
+
+        for flower_id, name, variety, color, quantity, price in FLOWERS:
+            batch_id = uuid5(
+                NAMESPACE_DNS,
+                f"bloombalance-demo-{flower_id}",
             )
 
-            if balance is None:
-                db.add(InventoryBalance(
-                    batch_id=batch_id,
-                    location_id=location_id,
-                    available_quantity=quantity,
-                    reserved_quantity=0,
-                ))
+            if db.get(InventoryBalance, (batch_id, location_id)) is None:
+                db.add(
+                    InventoryBalance(
+                        batch_id=batch_id,
+                        location_id=location_id,
+                        available_quantity=quantity,
+                        reserved_quantity=0,
+                    )
+                )
+
+        db.flush()
 
     print("Demo data seeded successfully.")
     print(f"Grower ID: {GROWER_ID}")
     print(f"Florist ID: {FLORIST_ID}")
+    print(f"Inventory Location ID: {location_id}")
+    print(f"Flowers configured: {len(FLOWERS)}")
 
 
 if __name__ == "__main__":
