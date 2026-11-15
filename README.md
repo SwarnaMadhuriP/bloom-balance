@@ -48,7 +48,7 @@ BloomBalance addresses these challenges through:
 - Order lifecycle validation
 - Expired inventory and waste recording
 
-### 📊 BloomTrace — Waste Analytics
+### 📊 BloomTrace - Waste Analytics
 
 - Track wasted and expired flower inventory
 - Process inventory waste events asynchronously
@@ -400,4 +400,4 @@ Cloud deployment is planned.
 
 ---
 
-**BloomBalance — Connecting flower growers and florists through smarter inventory management and waste reduction.**
+**BloomBalance - Connecting flower growers and florists through smarter inventory management and waste reduction.**
